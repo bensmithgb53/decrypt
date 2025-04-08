@@ -1,5 +1,3 @@
-// Run with: deno run --allow-net --allow-write decrypt-hls.js
-
 const playlistUrl = 'https://streamed.su/watch/punjab-kings-vs-chennai-super-kings-2221947/alpha/1';
 
 async function fetchM3U8(url) {
