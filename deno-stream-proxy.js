@@ -1,142 +1,62 @@
-import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+// Run with: deno run --allow-net --allow-write decrypt-hls.js
 
-console.log("Starting WASM API server...");
+const playlistUrl = 'https://streamed.su/watch/punjab-kings-vs-chennai-super-kings-2221947/alpha/1';
 
-// Mock window/document for WASM compatibility
-globalThis.window = globalThis;
-globalThis.document = { 
-    querySelector: () => ({ appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 }), 
-    createElement: () => ({ remove: () => {}, style: {} })
-};
+async function fetchM3U8(url) {
+  const res = await fetch(url);
+  return await res.text();
+}
 
-// Load WASM exec and module
-const wasmExecResponse = await fetch("https://embedstreams.top/plr/wasm_exec.js");
-eval(await wasmExecResponse.text());
+async function fetchKey(keyUri) {
+  const fullKeyUrl = `https://streamed.su${keyUri}`;
+  const res = await fetch(fullKeyUrl);
+  const key = new Uint8Array(await res.arrayBuffer());
+  console.log('Fetched Key:', key);
+  return key;
+}
 
-const go = new Go();
-const wasmResponse = await fetch("https://embedstreams.top/plr/main.wasm");
-const wasmModule = await WebAssembly.instantiate(await wasmResponse.arrayBuffer(), go.importObject);
-go.run(wasmModule.instance);
+async function fetchSegment(segmentUrl) {
+  const res = await fetch(segmentUrl);
+  return new Uint8Array(await res.arrayBuffer());
+}
 
-setInterval(() => {
-    if (go._inst && typeof go._inst.exports.go_scheduler === "function") {
-        go._inst.exports.go_scheduler();
-    }
-}, 100);
+async function decryptSegment(encryptedData, key, ivHex) {
+  const iv = new Uint8Array(ivHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'AES-CBC' },
+    false,
+    ['decrypt'],
+  );
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-CBC', iv },
+    cryptoKey,
+    encryptedData,
+  );
+  return new Uint8Array(decrypted);
+}
 
-// Headers from your Python script
-const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
-    "Referer": "https://embedstreams.top/",
-    "Cookie": "__ddg1_=Vi3RmtqoQRb8DffOJ28q; __ddg8_=1iCJjqg0w3AzTvUP; __ddg9_=82.46.16.114; __ddg10_=1744124631"
-};
+function parsePlaylist(m3u8Text) {
+  const keyLine = m3u8Text.match(/#EXT-X-KEY:METHOD=AES-128,URI="([^"]+)",IV=0x([a-fA-F0-9]+)/);
+  const segments = [...m3u8Text.matchAll(/https:\/\/[^\n]+/g)].map(match => match[0].replace('https://corsproxy.io/?url=', ''));
+  return { keyUri: keyLine[1], iv: keyLine[2], segments };
+}
 
-// Target URL from your Python script
-const TARGET_URL = "https://rr.buytommy.top/s/jRwpGkyCKixMn0_IvGQwSIRPS3AwmORsOtxNwb7Zk7kON1bB48UseifrZNs3LF3Y/wFy8dycpF4kOjorpSKe2x5evFOqvlux9l22PedN1FY83gL5R4EN75OTbPchEFvE0mFOTKk-oQgQsqPkX4ceOlNHG4G4GKyfL7E8WJNqdnHA/-bqMzx-wDPy1f-QIeIsYEqPkoNpFrOkTq2rWqQqRV6jUdUSJU382DsMStbO58P6g/strm.m3u8?md5=ZN7hQor2a8LYg0KzDv9Oig&expiry=1744136845";
-const BASE_URL = "http://localhost:8000";
+async function main() {
+  const m3u8Text = await fetchM3U8(playlistUrl);
+  const { keyUri, iv, segments } = parsePlaylist(m3u8Text);
+  const key = await fetchKey(keyUri);
 
-serve(async (req) => {
-    const url = new URL(req.url, `http://${req.headers.get("host")}`);
+  for (let i = 0; i < segments.length; i++) {
+    const segmentUrl = segments[i];
+    console.log(`Downloading segment ${i + 1}/${segments.length}: ${segmentUrl}`);
+    const encryptedData = await fetchSegment(segmentUrl);
+    const decryptedData = await decryptSegment(encryptedData, key, iv);
+    await Deno.writeFile(`segment_${i}.ts`, decryptedData);
+  }
 
-    // Serve the .m3u8 playlist
-    if (url.pathname === "/stream") {
-        try {
-            const response = await fetch(TARGET_URL, { headers: HEADERS });
-            const data = await response.text();
-            const lines = data.split("\n");
-            const rewrittenLines = lines.map(line => {
-                if (line.startsWith("#EXT-X-KEY:")) {
-                    const keyMatch = line.match(/URI="([^"]+)"/);
-                    if (keyMatch) {
-                        const keyUrl = keyMatch[1];
-                        const newKeyUrl = `${BASE_URL}/key${keyUrl.startsWith("/") ? keyUrl : "/" + keyUrl}`;
-                        return line.replace(keyMatch[1], newKeyUrl);
-                    }
-                } else if (line.trim() && !line.startsWith("#")) {
-                    const segmentUrl = line.includes("corsproxy.io") ? line.split("url=")[1] : line;
-                    return `${BASE_URL}/segments/${encodeURIComponent(segmentUrl)}`;
-                }
-                return line;
-            });
-            const rewrittenData = rewrittenLines.join("\n");
-            console.log("Serving rewritten m3u8:\n", rewrittenData);
+  console.log('All segments downloaded and decrypted!');
+}
 
-            return new Response(rewrittenData, {
-                status: 200,
-                headers: {
-                    "Content-Type": "application/vnd.apple.mpegurl",
-                    "Access-Control-Allow-Origin": "*",
-                    "Connection": "keep-alive"
-                }
-            });
-        } catch (e) {
-            console.error("Error fetching m3u8:", e);
-            return new Response("Error fetching playlist", { status: 500 });
-        }
-    }
-
-    // Serve the key
-    if (url.pathname.startsWith("/key/")) {
-        try {
-            const keyPath = url.pathname.replace("/key", "");
-            const keyUrl = `https://rr.buytommy.top${keyPath}`;
-            const response = await fetch(keyUrl, { headers: HEADERS });
-            const data = await response.arrayBuffer();
-            console.log(`Fetched key: ${keyUrl}, size: ${data.byteLength} bytes`);
-
-            return new Response(data, {
-                status: 200,
-                headers: {
-                    "Content-Type": "application/octet-stream",
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Length": data.byteLength.toString()
-                }
-            });
-        } catch (e) {
-            console.error("Error fetching key:", e);
-            return new Response("Error fetching key", { status: 500 });
-        }
-    }
-
-    // Serve segments
-    if (url.pathname.startsWith("/segments/")) {
-        try {
-            const segmentUrl = decodeURIComponent(url.pathname.replace("/segments/", ""));
-            const response = await fetch(segmentUrl, { headers: HEADERS });
-            const data = await response.arrayBuffer();
-            console.log(`Fetched segment: ${segmentUrl}, size: ${data.byteLength} bytes`);
-
-            return new Response(data, {
-                status: 200,
-                headers: {
-                    "Content-Type": "video/mp2t",
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Length": data.byteLength.toString()
-                }
-            });
-        } catch (e) {
-            console.error("Error fetching segment:", e);
-            return new Response("Error fetching segment", { status: 500 });
-        }
-    }
-
-    // Existing decrypt endpoint
-    if (req.method === "POST" && url.pathname === "/decrypt") {
-        const data = await req.json();
-        const encrypted = data.encrypted;
-        const referer = data.referer || "https://embedstreams.top/embed/alpha/sky-sports-darts/1";
-        if (!encrypted || !globalThis.decrypt) {
-            return new Response(JSON.stringify({ error: "Missing data or decrypt function" }), { status: 400 });
-        }
-        try {
-            const decrypted = globalThis.decrypt(encrypted);
-            return new Response(JSON.stringify({ decrypted: decrypted }), { status: 200 });
-        } catch (e) {
-            return new Response(JSON.stringify({ error: e.message }), { status: 500 });
-        }
-    }
-
-    return new Response("Not Found", { status: 404 });
-}, { port: 8000 });
-
-console.log("Server running on Deno Deploy at http://localhost:8000");
+main().catch(console.error);
