@@ -1,3 +1,4 @@
+// m3u8-fetcher.ts
 import { serve } from "https://deno.land/std@0.223.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
@@ -7,6 +8,10 @@ serve(async (req) => {
   }
 
   const { m3u8Url, cookies, referer } = await req.json();
+
+  if (!m3u8Url) {
+    return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { status: 400 });
+  }
 
   const headers = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
