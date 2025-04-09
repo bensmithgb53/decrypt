@@ -1,4 +1,3 @@
-// server.ts
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 
 console.log("Starting WASM API server...");
@@ -34,36 +33,6 @@ serve(async (req) => {
         try {
             const decrypted = globalThis.decrypt(encrypted);
             return new Response(JSON.stringify({ decrypted: decrypted }), { status: 200 });
-        } catch (e) {
-            return new Response(JSON.stringify({ error: e.message }), { status: 500 });
-        }
-    }
-    // New minimal /fetch-m3u8 endpoint
-    if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
-        const data = await req.json();
-        const m3u8Url = data.m3u8Url;
-        const cookies = data.cookies || "";
-        const referer = data.referer || "https://embedstreams.top/";
-        
-        if (!m3u8Url) {
-            return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { status: 400 });
-        }
-
-        const headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
-            "Accept": "*/*",
-            "Origin": "https://embedstreams.top",
-            "Referer": referer,
-            "Cookie": cookies
-        };
-
-        try {
-            const response = await fetch(m3u8Url, { headers });
-            const m3u8Text = await response.text();
-            if (!m3u8Text.startsWith("#EXTM3U")) {
-                return new Response(JSON.stringify({ error: "Invalid M3U8 content" }), { status: 500 });
-            }
-            return new Response(JSON.stringify({ m3u8: m3u8Text }), { status: 200 });
         } catch (e) {
             return new Response(JSON.stringify({ error: e.message }), { status: 500 });
         }
