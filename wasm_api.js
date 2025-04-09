@@ -24,76 +24,51 @@ setInterval(() => {
 }, 100);
 
 serve(async (req) => {
-    const url = new URL(req.url);
-    const path = url.pathname;
-
-    // Original /decrypt endpoint
-    if (req.method === "POST" && path === "/decrypt") {
+    if (req.method === "POST" && req.url.endsWith("/decrypt")) {
         const data = await req.json();
         const encrypted = data.encrypted;
         const referer = data.referer || "https://embedstreams.top/embed/alpha/sky-sports-darts/1";
         if (!encrypted || !globalThis.decrypt) {
-            return new Response(JSON.stringify({ error: "Missing data or decrypt function" }), { 
-                status: 400,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ error: "Missing data or decrypt function" }), { status: 400 });
         }
         try {
             const decrypted = globalThis.decrypt(encrypted);
-            return new Response(JSON.stringify({ decrypted: decrypted }), { 
-                status: 200,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ decrypted: decrypted }), { status: 200 });
         } catch (e) {
-            return new Response(JSON.stringify({ error: e.message }), { 
-                status: 500,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ error: e.message }), { status: 500 });
         }
     }
-
-    // New /fetch-m3u8 endpoint (no Brotli for now)
-    if (req.method === "POST" && path === "/fetch-m3u8") {
-        const { m3u8Url, cookies, referer } = await req.json();
-
+    // New minimal /fetch-m3u8 endpoint
+    if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
+        const data = await req.json();
+        const m3u8Url = data.m3u8Url;
+        const cookies = data.cookies || "";
+        const referer = data.referer || "https://embedstreams.top/";
+        
         if (!m3u8Url) {
-            return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { 
-                status: 400,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { status: 400 });
         }
 
         const headers = {
             "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
             "Accept": "*/*",
             "Origin": "https://embedstreams.top",
-            "Referer": referer || "https://embedstreams.top/",
-            "Cookie": cookies || "",
+            "Referer": referer,
+            "Cookie": cookies
         };
 
         try {
             const response = await fetch(m3u8Url, { headers });
             const m3u8Text = await response.text();
             if (!m3u8Text.startsWith("#EXTM3U")) {
-                throw new Error("Invalid M3U8 content");
+                return new Response(JSON.stringify({ error: "Invalid M3U8 content" }), { status: 500 });
             }
-            return new Response(JSON.stringify({ m3u8: m3u8Text }), { 
-                status: 200,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ m3u8: m3u8Text }), { status: 200 });
         } catch (e) {
-            console.error("M3U8 fetch error:", e.message);
-            return new Response(JSON.stringify({ error: e.message }), { 
-                status: 500,
-                headers: { "Content-Type": "application/json" }
-            });
+            return new Response(JSON.stringify({ error: e.message }), { status: 500 });
         }
     }
-
-    return new Response("Not Found", { 
-        status: 404,
-        headers: { "Content-Type": "text/plain" }
-    });
+    return new Response("Not Found", { status: 404 });
 }, { port: 8000 });
 
 console.log("Server running on Deno Deploy");
