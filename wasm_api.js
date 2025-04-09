@@ -42,11 +42,13 @@ serve(async (req) => {
         }
         try {
             const decrypted = globalThis.decrypt(encrypted);
+            console.log("Decrypted:", decrypted); // Log successful decryption
             return new Response(JSON.stringify({ decrypted: decrypted }), { 
                 status: 200,
                 headers: { "Content-Type": "application/json" }
             });
         } catch (e) {
+            console.error("Decryption error:", e.message);
             return new Response(JSON.stringify({ error: e.message }), { 
                 status: 500,
                 headers: { "Content-Type": "application/json" }
@@ -57,6 +59,7 @@ serve(async (req) => {
     // Handle /fetch-m3u8 endpoint
     if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
         const { m3u8Url, cookies, referer } = await req.json();
+        console.log("Fetching M3U8 URL:", m3u8Url); // Log URL
 
         if (!m3u8Url) {
             return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { 
@@ -77,15 +80,19 @@ serve(async (req) => {
         try {
             const response = await fetch(m3u8Url, { headers });
             const contentEncoding = response.headers.get("Content-Encoding")?.toLowerCase();
+            console.log("Content-Encoding:", contentEncoding); // Log encoding
             const rawBytes = new Uint8Array(await response.arrayBuffer());
+            console.log("Raw bytes (first 100):", rawBytes.slice(0, 100)); // Log raw data
 
             let m3u8Text;
             if (contentEncoding === "br") {
                 console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
                 m3u8Text = new TextDecoder().decode(decompressed);
+                console.log("Decompressed M3U8:", m3u8Text.slice(0, 100)); // Log decompressed
             } else {
                 m3u8Text = new TextDecoder().decode(rawBytes);
+                console.log("Uncompressed M3U8:", m3u8Text.slice(0, 100)); // Log uncompressed
             }
 
             if (!m3u8Text.startsWith("#EXTM3U")) {
