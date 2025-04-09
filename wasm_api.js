@@ -1,4 +1,5 @@
-import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+// server.ts
+import { serve } from "https://deno.land/std@0.223.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
 console.log("Starting WASM API server...");
@@ -11,14 +12,22 @@ globalThis.document = {
 };
 
 // Load wasm_exec.js
-const wasmExecResponse = await fetch("https://embedstreams.top/plr/wasm_exec.js");
-eval(await wasmExecResponse.text());
+try {
+    const wasmExecResponse = await fetch("https://embedstreams.top/plr/wasm_exec.js");
+    eval(await wasmExecResponse.text());
+} catch (e) {
+    console.error("Failed to load wasm_exec.js:", e.message);
+}
 
 // Initialize and run Go WASM
 const go = new Go();
-const wasmResponse = await fetch("https://embedstreams.top/plr/main.wasm");
-const wasmModule = await WebAssembly.instantiate(await wasmResponse.arrayBuffer(), go.importObject);
-go.run(wasmModule.instance);
+try {
+    const wasmResponse = await fetch("https://embedstreams.top/plr/main.wasm");
+    const wasmModule = await WebAssembly.instantiate(await wasmResponse.arrayBuffer(), go.importObject);
+    go.run(wasmModule.instance);
+} catch (e) {
+    console.error("Failed to load or run WASM:", e.message);
+}
 
 // Scheduler for Go runtime
 setInterval(() => {
@@ -28,8 +37,11 @@ setInterval(() => {
 }, 100);
 
 serve(async (req) => {
+    const url = new URL(req.url);
+    const path = url.pathname;
+
     // Handle /decrypt endpoint
-    if (req.method === "POST" && req.url.endsWith("/decrypt")) {
+    if (req.method === "POST" && path === "/decrypt") {
         const data = await req.json();
         const encrypted = data.encrypted;
         const referer = data.referer || "https://embedstreams.top/embed/alpha/sky-sports-darts/1";
@@ -46,6 +58,7 @@ serve(async (req) => {
                 headers: { "Content-Type": "application/json" }
             });
         } catch (e) {
+            console.error("Decryption error:", e.message);
             return new Response(JSON.stringify({ error: e.message }), { 
                 status: 500,
                 headers: { "Content-Type": "application/json" }
@@ -54,7 +67,7 @@ serve(async (req) => {
     }
 
     // Handle /fetch-m3u8 endpoint
-    if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
+    if (req.method === "POST" && path === "/fetch-m3u8") {
         const { m3u8Url, cookies, referer } = await req.json();
 
         if (!m3u8Url) {
@@ -96,7 +109,7 @@ serve(async (req) => {
                 headers: { "Content-Type": "application/json" }
             });
         } catch (e) {
-            console.error("Error fetching M3U8:", e.message);
+            console.error("M3U8 fetch error:", e.message);
             return new Response(JSON.stringify({ error: e.message }), { 
                 status: 500,
                 headers: { "Content-Type": "application/json" }
