@@ -42,7 +42,7 @@ serve(async (req) => {
         }
         try {
             const decrypted = globalThis.decrypt(encrypted);
-            console.log("Decrypted:", decrypted); // Log successful decryption
+            console.log("Decrypted:", decrypted);
             return new Response(JSON.stringify({ decrypted: decrypted }), { 
                 status: 200,
                 headers: { "Content-Type": "application/json" }
@@ -59,9 +59,10 @@ serve(async (req) => {
     // Handle /fetch-m3u8 endpoint
     if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
         const { m3u8Url, cookies, referer } = await req.json();
-        console.log("Fetching M3U8 URL:", m3u8Url); // Log URL
+        console.log("Request data:", { m3u8Url, cookies, referer });
 
         if (!m3u8Url) {
+            console.log("Missing m3u8Url");
             return new Response(JSON.stringify({ error: "Missing m3u8Url" }), { 
                 status: 400,
                 headers: { "Content-Type": "application/json" }
@@ -69,42 +70,55 @@ serve(async (req) => {
         }
 
         const headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "Accept": "*/*",
             "Origin": "https://embedstreams.top",
             "Referer": referer || "https://embedstreams.top/",
             "Accept-Encoding": "br",
             "Cookie": cookies || "",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "cross-site"
         };
+        console.log("Fetching with headers:", headers);
 
         try {
             const response = await fetch(m3u8Url, { headers });
+            console.log("Response status:", response.status);
+            console.log("Response headers:", Object.fromEntries(response.headers.entries()));
             const contentEncoding = response.headers.get("Content-Encoding")?.toLowerCase();
-            console.log("Content-Encoding:", contentEncoding); // Log encoding
+            console.log("Content-Encoding:", contentEncoding);
             const rawBytes = new Uint8Array(await response.arrayBuffer());
-            console.log("Raw bytes (first 100):", rawBytes.slice(0, 100)); // Log raw data
+            console.log("Raw bytes (first 100):", rawBytes.slice(0, 100));
 
             let m3u8Text;
             if (contentEncoding === "br") {
                 console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
                 m3u8Text = new TextDecoder().decode(decompressed);
-                console.log("Decompressed M3U8:", m3u8Text.slice(0, 100)); // Log decompressed
+                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
             } else {
                 m3u8Text = new TextDecoder().decode(rawBytes);
-                console.log("Uncompressed M3U8:", m3u8Text.slice(0, 100)); // Log uncompressed
+                console.log("Uncompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
             }
 
+            // Pass through even if not perfect, for debugging
             if (!m3u8Text.startsWith("#EXTM3U")) {
-                throw new Error("Invalid M3U8 content");
+                console.error("Invalid M3U8 content:", m3u8Text.slice(0, 200));
+                return new Response(JSON.stringify({ m3u8: m3u8Text, warning: "Invalid M3U8 content" }), { 
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                });
             }
 
+            console.log("Returning M3U8:", m3u8Text.slice(0, 200));
             return new Response(JSON.stringify({ m3u8: m3u8Text }), { 
                 status: 200,
                 headers: { "Content-Type": "application/json" }
             });
         } catch (e) {
-            console.error("Error fetching M3U8:", e.message);
+            console.error("Fetch error:", e.message);
             return new Response(JSON.stringify({ error: e.message }), { 
                 status: 500,
                 headers: { "Content-Type": "application/json" }
