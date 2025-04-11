@@ -23,9 +23,10 @@ async function fetchUrl(url) {
 
 const handler = async (req) => {
   const url = new URL(req.url);
-  console.log(`Request path: ${url.pathname}${url.search}`);
+  const pathname = url.pathname.replace(/^\/+/, "/"); // Normalize multiple leading slashes
+  console.log(`Request path: ${pathname}${url.search}`);
 
-  if (url.pathname === "/playlist.m3u8") {
+  if (pathname === "/playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
     if (!m3u8Url) {
       return new Response("Missing 'url' query parameter", { status: 400 });
@@ -66,7 +67,7 @@ const handler = async (req) => {
     }
   }
 
-  const requestedPath = url.pathname.replace(/^\//, "");
+  const requestedPath = pathname.replace(/^\//, "");
   if (!requestedPath) {
     return new Response("Not found", { status: 404 });
   }
