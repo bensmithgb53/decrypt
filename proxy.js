@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
@@ -23,7 +24,7 @@ async function fetchUrl(url) {
 
 const handler = async (req) => {
   const url = new URL(req.url);
-  const pathname = url.pathname.replace(/^\/+/, "/"); // Normalize multiple leading slashes
+  const pathname = url.pathname.replace(/^\/+/, "/");
   console.log(`Request path: ${pathname}${url.search}`);
 
   if (pathname === "/playlist.m3u8") {
@@ -64,6 +65,43 @@ const handler = async (req) => {
     } catch (e) {
       console.error(e);
       return new Response(`Error fetching M3U8: ${e.message}`, { status: 500 });
+    }
+  }
+
+  if (pathname === "/poster") {
+    const posterUrl = url.searchParams.get("url");
+    const status = url.searchParams.get("status");
+    if (!posterUrl || !status) {
+      return new Response("Missing 'url' or 'status' query parameter", { status: 400 });
+    }
+
+    try {
+      const { content: imageData } = await fetchUrl(posterUrl);
+      const image = await Image.decode(imageData);
+
+      // Overlay text
+      const fontSize = 20;
+      const padding = 10;
+      const textWidth = status.length * fontSize * 0.6; // Rough estimate
+      const textHeight = fontSize + padding * 2;
+      const backgroundColor = status === "LIVE" ? 0xFF0000FF : 0x666666FF; // Red for LIVE, gray for time
+      const textColor = 0xFFFFFFFF; // White text
+
+      // Draw background
+      image.fillRect(padding, padding, textWidth, textHeight, backgroundColor);
+      // Draw text
+      image.drawText(padding + padding / 2, padding + fontSize, status, textColor, { font: `${fontSize}px sans-serif` });
+
+      const editedImage = await image.encode();
+      return new Response(editedImage, {
+        headers: {
+          "Content-Type": "image/webp",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    } catch (e) {
+      console.error(e);
+      return new Response(`Error editing poster: ${e.message}`, { status: 500 });
     }
   }
 
