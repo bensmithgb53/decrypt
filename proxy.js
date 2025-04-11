@@ -20,7 +20,7 @@ async function fetchUrl(url) {
   return { content, contentType };
 }
 
-serve(async (req) => {
+const handler = async (req) => {
   const url = new URL(req.url);
   console.log(`Request path: ${url.pathname}${url.search}`);
 
@@ -65,14 +65,14 @@ serve(async (req) => {
   }
 
   const requestedPath = url.pathname.replace(/^\//, "");
-  let fetchUrl = SEGMENT_MAP.get(requestedPath);
-  if (!fetchUrl) {
-    fetchUrl = new URL(requestedPath.replace(".ts", ".js"), "https://rr.buytommy.top/").href;
-    console.log(`Unmapped request, trying: ${fetchUrl}`);
+  let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
+  if (!fetchUrlResult) {
+    fetchUrlResult = new URL(requestedPath.replace(".ts", ".js"), "https://rr.buytommy.top/").href;
+    console.log(`Unmapped request, trying: ${fetchUrlResult}`);
   }
 
   try {
-    const { content, contentType } = await fetchUrl(fetchUrl);
+    const { content, contentType } = await fetchUrl(fetchUrlResult);
     return new Response(content, {
       headers: {
         "Content-Type": contentType,
@@ -83,4 +83,6 @@ serve(async (req) => {
     console.error(e);
     return new Response(`Error fetching resource: ${e.message}`, { status: 500 });
   }
-}, { port: 8000 });
+};
+
+serve(handler, { port: 8000 });
