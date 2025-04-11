@@ -14,9 +14,9 @@ async function fetchUrl(url) {
   console.log(`Fetching: ${url}`);
   const response = await fetch(url, { headers: HEADERS });
   if (!response.ok) throw new Error(`Failed: ${url} | Status: ${response.status}`);
-  const content = await response.text();
+  const content = await response.arrayBuffer(); // Use binary for segments
   const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-  console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.length} bytes`);
+  console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
   return { content, contentType };
 }
 
@@ -32,8 +32,9 @@ const handler = async (req) => {
 
     try {
       const { content: m3u8Content } = await fetchUrl(m3u8Url);
+      const m3u8Text = new TextDecoder().decode(m3u8Content);
       SEGMENT_MAP.clear();
-      const m3u8Lines = m3u8Content.split("\n");
+      const m3u8Lines = m3u8Text.split("\n");
       for (let i = 0; i < m3u8Lines.length; i++) {
         if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
           const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
@@ -75,7 +76,7 @@ const handler = async (req) => {
     const { content, contentType } = await fetchUrl(fetchUrlResult);
     return new Response(content, {
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": contentType === "text/css" ? "video/mp2t" : contentType, // Fix for segments
         "Access-Control-Allow-Origin": "*"
       }
     });
