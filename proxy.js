@@ -5,7 +5,8 @@ const HEADERS = {
   "Referer": "https://embedstreams.top/",
   "Accept": "*/*",
   "Origin": "https://embedstreams.top",
-  "Accept-Encoding": "identity"
+  "Accept-Encoding": "identity",
+  "Cookie": "__ddg8_=5Ql4W19U75au1omU; __ddg10_=1744345197; __ddg9_=82.46.16.114; __ddg1_=CXWkM9IjfJXcFutkGKsS"
 };
 
 const SEGMENT_MAP = new Map();
@@ -14,7 +15,7 @@ async function fetchUrl(url) {
   console.log(`Fetching: ${url}`);
   const response = await fetch(url, { headers: HEADERS });
   if (!response.ok) throw new Error(`Failed: ${url} | Status: ${response.status}`);
-  const content = await response.arrayBuffer(); // Use binary for segments
+  const content = await response.arrayBuffer();
   const contentType = response.headers.get("Content-Type") || "application/octet-stream";
   console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
   return { content, contentType };
@@ -66,6 +67,10 @@ const handler = async (req) => {
   }
 
   const requestedPath = url.pathname.replace(/^\//, "");
+  if (!requestedPath) {
+    return new Response("Not found", { status: 404 });
+  }
+
   let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
   if (!fetchUrlResult) {
     fetchUrlResult = new URL(requestedPath.replace(".ts", ".js"), "https://rr.buytommy.top/").href;
@@ -76,7 +81,7 @@ const handler = async (req) => {
     const { content, contentType } = await fetchUrl(fetchUrlResult);
     return new Response(content, {
       headers: {
-        "Content-Type": contentType === "text/css" ? "video/mp2t" : contentType, // Fix for segments
+        "Content-Type": contentType === "text/css" ? "video/mp2t" : contentType,
         "Access-Control-Allow-Origin": "*"
       }
     });
