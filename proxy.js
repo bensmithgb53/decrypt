@@ -105,4 +105,16 @@ const handler = async (req) => {
 
   try {
     const { content, contentType } = await fetchUrl(fetchUrlResult);
-    return new Response(content,、手
+    return new Response(content, {
+      headers: {
+        "Content-Type": contentType === "text/css" ? "video/mp2t" : contentType,
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    return new Response(`Error fetching resource: ${e.message}`, { status: 500 });
+  }
+};
+
+serve(handler, { port: 8000 });
