@@ -19,48 +19,23 @@ const ALT_HEADERS = {
 const NETLIFY_HOST = "https://65ca72aaa9fc2103a99d9705--cosmic-dragon-830a5f.netlify.app";
 const SEGMENT_MAP = new Map();
 
-async function fetchUrl(url, headers, retries = 2, delay = 1000) {
+async function fetchUrl(url, headers) {
   console.log(`Fetching: ${url}`);
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      console.log(`Attempt ${attempt} with headers:`, JSON.stringify(headers));
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => "No body");
-        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
-      }
-      const content = await response.arrayBuffer();
-      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-      console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
-      return { content, contentType };
-    } catch (e) {
-      console.error(`Fetch error (attempt ${attempt}): ${e.message}`);
-      if (attempt < retries) {
-        console.log(`Retrying after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        throw e;
-      }
+  try {
+    console.log(`Headers: ${JSON.stringify(headers)}`);
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "No body");
+      throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
     }
-}
-
-async function fetchSegment(segmentUrl, headers, segmentName, segmentPrefix) {
-  const fallbackUrls = [
-    segmentUrl,
-    `https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`,
-    `${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`
-  ];
-
-  for (const url of fallbackUrls) {
-    try {
-      console.log(`Trying segment URL: ${url}`);
-      const result = await fetchUrl(url, headers);
-      return { ...result, url };
-    } catch (e) {
-      console.error(`Segment fetch failed for ${url}: ${e.message}`);
-    }
+    const content = await response.arrayBuffer();
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+    console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
+    return { content, contentType };
+  } catch (e) {
+    console.error(`Fetch error: ${e.message}`);
+    throw e;
   }
-  throw new Error(`All segment URLs failed for ${segmentName}`);
 }
 
 const handler = async (req) => {
@@ -71,14 +46,14 @@ const handler = async (req) => {
   const source = url.searchParams.get("source") || "unknown";
   const streamNo = url.searchParams.get("streamNo") || "unknown";
   const segmentPrefix = url.searchParams.get("segmentPrefix") || "unknown";
-  console.log(`Request path: ${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
+  console.log(`Request: ${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
   if (pathname === "/playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
     const cookies = url.searchParams.get("cookies") || "";
     if (!m3u8Url) {
-      console.error("Missing 'url' query parameter");
-      return new Response("Missing 'url' query parameter", { status: 400 });
+      console.error("Missing 'url' parameter");
+      return new Response("Missing 'url' parameter", { status: 400 });
     }
 
     try {
@@ -87,7 +62,7 @@ const handler = async (req) => {
       try {
         result = await fetchUrl(m3u8Url, headers);
       } catch (e) {
-        console.log("Primary headers failed, trying fallback...");
+        console.log("Trying fallback headers...");
         result = await fetchUrl(m3u8Url, ALT_HEADERS);
       }
 
@@ -99,19 +74,19 @@ const handler = async (req) => {
           const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
           const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
-          SEGMENT_MAP.set(originalUri.replace(/^\//, ""), new URL(originalUri, m3u8Url).href);
-          console.log(`Mapped key: ${originalUri} to ${newUri}`);
+          SEGMENT_MAP.set(originalUri.replace(/^\//, ""), originalUri);
+          console.log(`Mapped key: ${originalUri}`);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
           const newUrl = `${url.origin}/${segmentName}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = newUrl;
           SEGMENT_MAP.set(segmentName, originalUrl);
-          console.log(`Mapping ${segmentName} to ${originalUrl}`);
+          console.log(`Mapped segment: ${segmentName} to ${originalUrl}`);
         }
       }
       const rewrittenM3u8 = m3u8Lines.join("\n");
-      console.log(`Rewritten M3U8 content:\n${rewrittenM3u8.slice(0, 200)}...`);
+      console.log(`M3U8 content:\n${rewrittenM3u8.slice(0, 200)}...`);
 
       return new Response(rewrittenM3u8, {
         headers: {
@@ -120,37 +95,44 @@ const handler = async (req) => {
         }
       });
     } catch (e) {
-      console.error(`M3U8 fetch error: ${e.message}`);
+      console.error(`M3U8 error: ${e.message}`);
       return new Response(`Error fetching M3U8: ${e.message}`, { status: 500 });
     }
   }
 
   const requestedPath = pathname.replace(/^\//, "");
   if (!requestedPath) {
-    console.error("Empty path requested");
+    console.error("Empty path");
     return new Response("Not found", { status: 404 });
   }
 
+  const cookies = url.searchParams.get("cookies") || "";
+  const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
   let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
+
   if (!fetchUrlResult) {
-    fetchUrlResult = `https://rr.buytommy.top/${requestedPath.replace(".ts", ".js")}`;
-    console.log(`Unmapped request, trying: ${fetchUrlResult}`);
+    console.log(`Unmapped segment: ${requestedPath}`);
+    fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`;
   }
 
   try {
-    const cookies = url.searchParams.get("cookies") || "";
-    const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
-    const { content, contentType, url: fetchedUrl } = await fetchSegment(fetchUrlResult, headers, requestedPath, segmentPrefix);
-    console.log(`Segment fetched from: ${fetchedUrl}`);
-    return new Response(content, {
+    let result;
+    try {
+      result = await fetchUrl(fetchUrlResult, headers);
+    } catch (e) {
+      console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
+      result = await fetchUrl(`${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
+    }
+
+    return new Response(result.content, {
       headers: {
-        "Content-Type": contentType === "text/javascript" ? "video/mp2t" : contentType,
+        "Content-Type": result.contentType === "text/javascript" ? "video/mp2t" : result.contentType,
         "Access-Control-Allow-Origin": "*"
       }
     });
   } catch (e) {
-    console.error(`Segment fetch error: ${e.message}`);
-    return new Response(`Error fetching resource: ${e.message}`, { status: 500 });
+    console.error(`Segment error: ${e.message}`);
+    return new Response(`Error fetching segment: ${e.message}`, { status: 500 });
   }
 };
 
