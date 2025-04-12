@@ -23,11 +23,11 @@ async function fetchUrl(url, headers, retries = 2, delay = 1000) {
   console.log(`Fetching: ${url}`);
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      console.log(`Attempt ${attempt} with headers:`, headers);
+      console.log(`Attempt ${attempt} with headers:`, JSON.stringify(headers));
       const response = await fetch(url, { headers });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => "No body");
-        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.substring(0, 100)}`);
+        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
       }
       const content = await response.arrayBuffer();
       const contentType = response.headers.get("Content-Type") || "application/octet-stream";
@@ -47,9 +47,8 @@ async function fetchUrl(url, headers, retries = 2, delay = 1000) {
 async function fetchSegment(segmentUrl, headers, segmentName, segmentPrefix) {
   const fallbackUrls = [
     segmentUrl,
-    segmentUrl.replace("rr.buytommy.top", "p2-panel.streamed.su"),
-    `${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`,
-    segmentUrl.replace(".js", ".ts")
+    `https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`,
+    `${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`
   ];
 
   for (const url of fallbackUrls) {
@@ -72,28 +71,27 @@ const handler = async (req) => {
   const source = url.searchParams.get("source") || "unknown";
   const streamNo = url.searchParams.get("streamNo") || "unknown";
   const segmentPrefix = url.searchParams.get("segmentPrefix") || "unknown";
-  console.log(`Request path: ${pathname}${url.search}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
+  console.log(`Request path: ${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
   if (pathname === "/playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
     const cookies = url.searchParams.get("cookies") || "";
     if (!m3u8Url) {
+      console.error("Missing 'url' query parameter");
       return new Response("Missing 'url' query parameter", { status: 400 });
     }
 
     try {
-      const headers = { ...BASE_HEADERS, ...(cookies && { "Cookie": cookies }), "X-Stream-Type": streamType };
-      const fallbackHeaders = ALT_HEADERS;
+      const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
       let result;
       try {
         result = await fetchUrl(m3u8Url, headers);
       } catch (e) {
         console.log("Primary headers failed, trying fallback...");
-        result = await fetchUrl(m3u8Url, fallbackHeaders);
+        result = await fetchUrl(m3u8Url, ALT_HEADERS);
       }
 
-      const { content: m3u8Content } = result;
-      const m3u8Text = new TextDecoder().decode(m3u8Content);
+      const m3u8Text = new TextDecoder().decode(result.content);
       SEGMENT_MAP.clear();
       const m3u8Lines = m3u8Text.split("\n");
       for (let i = 0; i < m3u8Lines.length; i++) {
@@ -102,6 +100,7 @@ const handler = async (req) => {
           const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
           SEGMENT_MAP.set(originalUri.replace(/^\//, ""), new URL(originalUri, m3u8Url).href);
+          console.log(`Mapped key: ${originalUri} to ${newUri}`);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
@@ -112,7 +111,7 @@ const handler = async (req) => {
         }
       }
       const rewrittenM3u8 = m3u8Lines.join("\n");
-      console.log(`Rewritten M3U8 content:\n${rewrittenM3u8}`);
+      console.log(`Rewritten M3U8 content:\n${rewrittenM3u8.slice(0, 200)}...`);
 
       return new Response(rewrittenM3u8, {
         headers: {
@@ -121,35 +120,36 @@ const handler = async (req) => {
         }
       });
     } catch (e) {
-      console.error(e);
+      console.error(`M3U8 fetch error: ${e.message}`);
       return new Response(`Error fetching M3U8: ${e.message}`, { status: 500 });
     }
   }
 
   const requestedPath = pathname.replace(/^\//, "");
   if (!requestedPath) {
+    console.error("Empty path requested");
     return new Response("Not found", { status: 404 });
   }
 
   let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
   if (!fetchUrlResult) {
-    fetchUrlResult = new URL(requestedPath.replace(".ts", ".js"), "https://rr.buytommy.top/").href;
+    fetchUrlResult = `https://rr.buytommy.top/${requestedPath.replace(".ts", ".js")}`;
     console.log(`Unmapped request, trying: ${fetchUrlResult}`);
   }
 
   try {
     const cookies = url.searchParams.get("cookies") || "";
-    const headers = { ...BASE_HEADERS, ...(cookies && { "Cookie": cookies }), "X-Stream-Type": streamType };
+    const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
     const { content, contentType, url: fetchedUrl } = await fetchSegment(fetchUrlResult, headers, requestedPath, segmentPrefix);
     console.log(`Segment fetched from: ${fetchedUrl}`);
     return new Response(content, {
       headers: {
-        "Content-Type": contentType === "text/css" || contentType === "text/javascript" ? "video/mp2t" : contentType,
+        "Content-Type": contentType === "text/javascript" ? "video/mp2t" : contentType,
         "Access-Control-Allow-Origin": "*"
       }
     });
   } catch (e) {
-    console.error(e);
+    console.error(`Segment fetch error: ${e.message}`);
     return new Response(`Error fetching resource: ${e.message}`, { status: 500 });
   }
 };
