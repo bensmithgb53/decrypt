@@ -5,8 +5,7 @@ const BASE_HEADERS = {
   "Referer": "https://embedstreams.top/",
   "Accept": "*/*",
   "Origin": "https://embedstreams.top",
-  "Accept-Encoding": "identity",
-  "Cookie": "__ddg8_=5Ql4W19U75au1omU; __ddg10_=1744345197; __ddg9_=82.46.16.114; __ddg1_=CXWkM9IjfJXcFutkGKsS" // Replace with new cookies if available
+  "Accept-Encoding": "identity"
 };
 
 const ALT_HEADERS = {
@@ -17,23 +16,13 @@ const ALT_HEADERS = {
   "Accept-Encoding": "identity"
 };
 
-const NO_COOKIE_HEADERS = {
-  "User-Agent": BASE_HEADERS["User-Agent"],
-  "Referer": "https://embedstreams.top/",
-  "Accept": "*/*",
-  "Origin": "https://embedstreams.top",
-  "Accept-Encoding": "identity"
-};
-
 const SEGMENT_MAP = new Map();
 
-async function fetchUrl(url, retries = 3, delay = 1000) {
+async function fetchUrl(url, headers, retries = 2, delay = 1000) {
   console.log(`Fetching: ${url}`);
-  const headerSets = [BASE_HEADERS, ALT_HEADERS, NO_COOKIE_HEADERS];
-  for (let attempt = 0; attempt < retries; attempt++) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const headers = headerSets[attempt % headerSets.length];
-      console.log(`Attempt ${attempt + 1} with headers:`, headers);
+      console.log(`Attempt ${attempt} with headers:`, headers);
       const response = await fetch(url, { headers });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => "No body");
@@ -44,8 +33,8 @@ async function fetchUrl(url, retries = 3, delay = 1000) {
       console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
       return { content, contentType };
     } catch (e) {
-      console.error(`Fetch error (attempt ${attempt + 1}): ${e.message}`);
-      if (attempt < retries - 1) {
+      console.error(`Fetch error (attempt ${attempt}): ${e.message}`);
+      if (attempt < retries) {
         console.log(`Retrying after ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
@@ -62,12 +51,23 @@ const handler = async (req) => {
 
   if (pathname === "/playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
+    const cookies = url.searchParams.get("cookies") || "";
     if (!m3u8Url) {
       return new Response("Missing 'url' query parameter", { status: 400 });
     }
 
     try {
-      const { content: m3u8Content } = await fetchUrl(m3u8Url);
+      const headers = cookies ? { ...BASE_HEADERS, "Cookie": cookies } : BASE_HEADERS;
+      const fallbackHeaders = ALT_HEADERS;
+      let result;
+      try {
+        result = await fetchUrl(m3u8Url, headers);
+      } catch (e) {
+        console.log("Primary headers failed, trying fallback...");
+        result = await fetchUrl(m3u8Url, fallbackHeaders);
+      }
+
+      const { content: m3u8Content } = result;
       const m3u8Text = new TextDecoder().decode(m3u8Content);
       SEGMENT_MAP.clear();
       const m3u8Lines = m3u8Text.split("\n");
@@ -113,7 +113,9 @@ const handler = async (req) => {
   }
 
   try {
-    const { content, contentType } = await fetchUrl(fetchUrlResult);
+    const cookies = url.searchParams.get("cookies") || "";
+    const headers = cookies ? { ...BASE_HEADERS, "Cookie": cookies } : BASE_HEADERS;
+    const { content, contentType } = await fetchUrl(fetchUrlResult, headers);
     return new Response(content, {
       headers: {
         "Content-Type": contentType === "text/css" || contentType === "text/javascript" ? "video/mp2t" : contentType,
