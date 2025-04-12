@@ -16,6 +16,7 @@ const ALT_HEADERS = {
   "Accept-Encoding": "identity"
 };
 
+const NETLIFY_HOST = "https://65ca72aaa9fc2103a99d9705--cosmic-dragon-830a5f.netlify.app";
 const SEGMENT_MAP = new Map();
 
 async function fetchUrl(url, headers, retries = 2, delay = 1000) {
@@ -41,13 +42,37 @@ async function fetchUrl(url, headers, retries = 2, delay = 1000) {
         throw e;
       }
     }
+}
+
+async function fetchSegment(segmentUrl, headers, segmentName, segmentPrefix) {
+  const fallbackUrls = [
+    segmentUrl,
+    segmentUrl.replace("rr.buytommy.top", "p2-panel.streamed.su"),
+    `${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${segmentName.replace(".ts", ".js")}`,
+    segmentUrl.replace(".js", ".ts")
+  ];
+
+  for (const url of fallbackUrls) {
+    try {
+      console.log(`Trying segment URL: ${url}`);
+      const result = await fetchUrl(url, headers);
+      return { ...result, url };
+    } catch (e) {
+      console.error(`Segment fetch failed for ${url}: ${e.message}`);
+    }
   }
+  throw new Error(`All segment URLs failed for ${segmentName}`);
 }
 
 const handler = async (req) => {
   const url = new URL(req.url);
   const pathname = url.pathname.replace(/^\/+/, "/");
-  console.log(`Request path: ${pathname}${url.search}`);
+  const streamType = url.searchParams.get("streamType") || "unknown";
+  const matchId = url.searchParams.get("matchId") || "unknown";
+  const source = url.searchParams.get("source") || "unknown";
+  const streamNo = url.searchParams.get("streamNo") || "unknown";
+  const segmentPrefix = url.searchParams.get("segmentPrefix") || "unknown";
+  console.log(`Request path: ${pathname}${url.search}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
   if (pathname === "/playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
@@ -57,7 +82,7 @@ const handler = async (req) => {
     }
 
     try {
-      const headers = cookies ? { ...BASE_HEADERS, "Cookie": cookies } : BASE_HEADERS;
+      const headers = { ...BASE_HEADERS, ...(cookies && { "Cookie": cookies }), "X-Stream-Type": streamType };
       const fallbackHeaders = ALT_HEADERS;
       let result;
       try {
@@ -74,13 +99,13 @@ const handler = async (req) => {
       for (let i = 0; i < m3u8Lines.length; i++) {
         if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
           const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
-          const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}`;
+          const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
           SEGMENT_MAP.set(originalUri.replace(/^\//, ""), new URL(originalUri, m3u8Url).href);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
-          const newUrl = `${url.origin}/${segmentName}`;
+          const newUrl = `${url.origin}/${segmentName}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = newUrl;
           SEGMENT_MAP.set(segmentName, originalUrl);
           console.log(`Mapping ${segmentName} to ${originalUrl}`);
@@ -114,8 +139,9 @@ const handler = async (req) => {
 
   try {
     const cookies = url.searchParams.get("cookies") || "";
-    const headers = cookies ? { ...BASE_HEADERS, "Cookie": cookies } : BASE_HEADERS;
-    const { content, contentType } = await fetchUrl(fetchUrlResult, headers);
+    const headers = { ...BASE_HEADERS, ...(cookies && { "Cookie": cookies }), "X-Stream-Type": streamType };
+    const { content, contentType, url: fetchedUrl } = await fetchSegment(fetchUrlResult, headers, requestedPath, segmentPrefix);
+    console.log(`Segment fetched from: ${fetchedUrl}`);
     return new Response(content, {
       headers: {
         "Content-Type": contentType === "text/css" || contentType === "text/javascript" ? "video/mp2t" : contentType,
