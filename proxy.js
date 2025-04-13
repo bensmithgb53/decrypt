@@ -11,22 +11,25 @@ const BASE_HEADERS = {
 const NETLIFY_HOST = "https://flixy-proxy.netlify.app";
 const SEGMENT_MAP = new Map();
 
-async function fetchUrl(url, headers) {
+async function fetchUrl(url, headers, retries = 2) {
   console.log(`Fetching: ${url}`);
-  try {
-    console.log(`Headers: ${JSON.stringify(headers)}`);
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "No body");
-      throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`Attempt ${attempt} headers: ${JSON.stringify(headers)}`);
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "No body");
+        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
+      }
+      const content = await response.arrayBuffer();
+      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+      console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
+      return { content, contentType };
+    } catch (e) {
+      console.error(`Fetch error (attempt ${attempt}): ${e.message}`);
+      if (attempt === retries) throw e;
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    const content = await response.arrayBuffer();
-    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-    console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
-    return { content, contentType };
-  } catch (e) {
-    console.error(`Fetch error: ${e.message}`);
-    throw e;
   }
 }
 
