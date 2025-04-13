@@ -8,41 +8,26 @@ const BASE_HEADERS = {
   "Accept-Encoding": "identity"
 };
 
-const ALT_HEADERS = {
-  "User-Agent": BASE_HEADERS["User-Agent"],
-  "Referer": "https://streamed.su/",
-  "Accept": "*/*",
-  "Origin": "https://streamed.su",
-  "Accept-Encoding": "identity"
-};
-
-const NETLIFY_HOST = "https://65ca72aaa9fc2103a99d9705--cosmic-dragon-830a5f.netlify.app";
-const FLIXY_HOST = "https://flixy-proxy.netlify.app";
+const NETLIFY_HOST = "https://flixy-proxy.netlify.app";
 const SEGMENT_MAP = new Map();
 
-async function fetchUrl(url, headers, retries = 2, delay = 1000) {
+async function fetchUrl(url, headers) {
   console.log(`Fetching: ${url}`);
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      console.log(`Attempt ${attempt} headers: ${JSON.stringify(headers)}`);
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => "No body");
-        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
-      }
-      const content = await response.arrayBuffer();
-      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-      console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
-      return { content, contentType };
-    } catch (e) {
-      console.error(`Fetch error (attempt ${attempt}): ${e.message}`);
-      if (attempt < retries) {
-        console.log(`Retrying after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        throw e;
-      }
+  try {
+    console.log(`Headers: ${JSON.stringify(headers)}`);
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "No body");
+      throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
     }
+    const content = await response.arrayBuffer();
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+    console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
+    return { content, contentType };
+  } catch (e) {
+    console.error(`Fetch error: ${e.message}`);
+    throw e;
+  }
 }
 
 const handler = async (req) => {
@@ -65,28 +50,19 @@ const handler = async (req) => {
 
     try {
       const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
-      let result;
-      try {
-        result = await fetchUrl(m3u8Url, headers, 3);
-      } catch (e) {
-        console.log("Trying fallback headers...");
-        result = await fetchUrl(m3u8Url, ALT_HEADERS, 3);
-      }
+      const result = await fetchUrl(m3u8Url, headers);
 
       const m3u8Text = new TextDecoder().decode(result.content);
       SEGMENT_MAP.clear();
       const m3u8Lines = m3u8Text.split("\n");
       for (let i = 0; i < m3u8Lines.length; i++) {
         if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
-          let originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
-          if (!originalUri.startsWith("http")) {
-            originalUri = new URL(originalUri, m3u8Url).href;
-          }
-          const keyPath = originalUri.split("/").slice(3).join("/");
-          const newUri = `${url.origin}/${keyPath}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
+          const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
+          const keyPath = originalUri.split("/").pop();
+          const newUri = `${url.origin}/key-${keyPath}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
-          SEGMENT_MAP.set(keyPath, originalUri);
-          console.log(`Mapped key: ${keyPath} to ${originalUri}`);
+          SEGMENT_MAP.set(`key-${keyPath}`, originalUri);
+          console.log(`Mapped key: key-${keyPath} to ${originalUri}`);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
@@ -119,25 +95,20 @@ const handler = async (req) => {
 
   const cookies = url.searchParams.get("cookies") || "";
   const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
-  let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
+  const mappedUrl = SEGMENT_MAP.get(requestedPath);
 
-  if (!fetchUrlResult) {
-    console.log(`Unmapped: ${requestedPath}`);
+  let fetchUrlResult;
+  if (mappedUrl) {
+    fetchUrlResult = mappedUrl;
+  } else if (requestedPath.startsWith("key-")) {
+    fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace("key-", "")}`;
+  } else {
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`;
   }
+  console.log(`Fetching resource: ${fetchUrlResult}`);
 
   try {
-    let result;
-    try {
-      result = await fetchUrl(fetchUrlResult, headers);
-    } catch (e) {
-      console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
-      result = await fetchUrl(`${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
-    } catch (e) {
-      console.log(`Trying Flixy: ${FLIXY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
-      result = await fetchUrl(`${FLIXY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
-    }
-
+    let result = await fetchUrl(fetchUrlResult, headers);
     return new Response(result.content, {
       headers: {
         "Content-Type": result.contentType === "text/javascript" ? "video/mp2t" : result.contentType,
@@ -145,8 +116,19 @@ const handler = async (req) => {
       }
     });
   } catch (e) {
-    console.error(`Segment error: ${e.message}`);
-    return new Response(`Error fetching segment: ${e.message}`, { status: 500 });
+    console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
+    try {
+      const result = await fetchUrl(`${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
+      return new Response(result.content, {
+        headers: {
+          "Content-Type": result.contentType === "text/javascript" ? "video/mp2t" : result.contentType,
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    } catch (e) {
+      console.error(`Resource error: ${e.message}`);
+      return new Response(`Error fetching resource: ${e.message}`, { status: 500 });
+    }
   }
 };
 
