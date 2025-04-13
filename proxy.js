@@ -22,6 +22,9 @@ async function fetchUrl(url, headers, retries = 2) {
         throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
       }
       const content = await response.arrayBuffer();
+      if (content.byteLength === 0) {
+        throw new Error(`Empty response: ${url}`);
+      }
       const contentType = response.headers.get("Content-Type") || "application/octet-stream";
       console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
       return { content, contentType };
@@ -36,15 +39,15 @@ async function fetchUrl(url, headers, retries = 2) {
 const handler = async (req) => {
   const url = new URL(req.url);
   const pathname = url.pathname.replace(/^\/+/, "");
-  const streamType = url.searchParams.get("streamType") || "unknown";
+  const streamType = url.searchParams.get("streamType") || "game";
   const matchId = url.searchParams.get("matchId") || "unknown";
   const source = url.searchParams.get("source") || "unknown";
   const streamNo = url.searchParams.get("streamNo") || "unknown";
-  const segmentPrefix = url.searchParams.get("segmentPrefix") || "unknown";
+  const segmentPrefix = url.searchParams.get("segmentPrefix") || matchId;
   console.log(`Request: /${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
   if (pathname === "playlist.m3u8") {
-    const m3u8Url = url.searchParams.get("url");
+    let m3u8Url = url.searchParams.get("url");
     const cookies = url.searchParams.get("cookies") || "";
     if (!m3u8Url) {
       console.error("Missing 'url' parameter");
@@ -53,7 +56,13 @@ const handler = async (req) => {
 
     try {
       const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
-      const result = await fetchUrl(m3u8Url, headers);
+      let result;
+      try {
+        result = await fetchUrl(m3u8Url, headers);
+      } catch (e) {
+        console.log(`M3U8 failed, trying Netlify: ${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`);
+        result = await fetchUrl(`${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`, headers);
+      }
 
       const m3u8Text = new TextDecoder().decode(result.content);
       SEGMENT_MAP.clear();
@@ -105,7 +114,7 @@ const handler = async (req) => {
 
   let fetchUrlResult;
   if (mappedUrl) {
-    fetchUrlResult = mappedUrl;
+    fetchUrlResult = mappedUrl.replace("rr.buytommy.top", "p2-panel.streamed.su");
   } else if (requestedPath.startsWith("key/")) {
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace("key/", "")}`;
   } else {
