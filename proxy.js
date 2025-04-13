@@ -17,38 +17,45 @@ const ALT_HEADERS = {
 };
 
 const NETLIFY_HOST = "https://65ca72aaa9fc2103a99d9705--cosmic-dragon-830a5f.netlify.app";
+const FLIXY_HOST = "https://flixy-proxy.netlify.app";
 const SEGMENT_MAP = new Map();
 
-async function fetchUrl(url, headers) {
+async function fetchUrl(url, headers, retries = 2, delay = 1000) {
   console.log(`Fetching: ${url}`);
-  try {
-    console.log(`Headers: ${JSON.stringify(headers)}`);
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "No body");
-      throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`Attempt ${attempt} headers: ${JSON.stringify(headers)}`);
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "No body");
+        throw new Error(`Failed: ${url} | Status: ${response.status} | Body: ${errorBody.slice(0, 100)}`);
+      }
+      const content = await response.arrayBuffer();
+      const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+      console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
+      return { content, contentType };
+    } catch (e) {
+      console.error(`Fetch error (attempt ${attempt}): ${e.message}`);
+      if (attempt < retries) {
+        console.log(`Retrying after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw e;
+      }
     }
-    const content = await response.arrayBuffer();
-    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-    console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes`);
-    return { content, contentType };
-  } catch (e) {
-    console.error(`Fetch error: ${e.message}`);
-    throw e;
-  }
 }
 
 const handler = async (req) => {
   const url = new URL(req.url);
-  const pathname = url.pathname.replace(/^\/+/, "/");
+  const pathname = url.pathname.replace(/^\/+/, "");
   const streamType = url.searchParams.get("streamType") || "unknown";
   const matchId = url.searchParams.get("matchId") || "unknown";
   const source = url.searchParams.get("source") || "unknown";
   const streamNo = url.searchParams.get("streamNo") || "unknown";
   const segmentPrefix = url.searchParams.get("segmentPrefix") || "unknown";
-  console.log(`Request: ${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
+  console.log(`Request: /${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
-  if (pathname === "/playlist.m3u8") {
+  if (pathname === "playlist.m3u8") {
     const m3u8Url = url.searchParams.get("url");
     const cookies = url.searchParams.get("cookies") || "";
     if (!m3u8Url) {
@@ -60,10 +67,10 @@ const handler = async (req) => {
       const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
       let result;
       try {
-        result = await fetchUrl(m3u8Url, headers);
+        result = await fetchUrl(m3u8Url, headers, 3);
       } catch (e) {
         console.log("Trying fallback headers...");
-        result = await fetchUrl(m3u8Url, ALT_HEADERS);
+        result = await fetchUrl(m3u8Url, ALT_HEADERS, 3);
       }
 
       const m3u8Text = new TextDecoder().decode(result.content);
@@ -71,11 +78,15 @@ const handler = async (req) => {
       const m3u8Lines = m3u8Text.split("\n");
       for (let i = 0; i < m3u8Lines.length; i++) {
         if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
-          const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
-          const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
+          let originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
+          if (!originalUri.startsWith("http")) {
+            originalUri = new URL(originalUri, m3u8Url).href;
+          }
+          const keyPath = originalUri.split("/").slice(3).join("/");
+          const newUri = `${url.origin}/${keyPath}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
-          SEGMENT_MAP.set(originalUri.replace(/^\//, ""), originalUri);
-          console.log(`Mapped key: ${originalUri}`);
+          SEGMENT_MAP.set(keyPath, originalUri);
+          console.log(`Mapped key: ${keyPath} to ${originalUri}`);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
@@ -100,7 +111,7 @@ const handler = async (req) => {
     }
   }
 
-  const requestedPath = pathname.replace(/^\//, "");
+  const requestedPath = pathname;
   if (!requestedPath) {
     console.error("Empty path");
     return new Response("Not found", { status: 404 });
@@ -111,7 +122,7 @@ const handler = async (req) => {
   let fetchUrlResult = SEGMENT_MAP.get(requestedPath);
 
   if (!fetchUrlResult) {
-    console.log(`Unmapped segment: ${requestedPath}`);
+    console.log(`Unmapped: ${requestedPath}`);
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`;
   }
 
@@ -122,6 +133,9 @@ const handler = async (req) => {
     } catch (e) {
       console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
       result = await fetchUrl(`${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
+    } catch (e) {
+      console.log(`Trying Flixy: ${FLIXY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
+      result = await fetchUrl(`${FLIXY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
     }
 
     return new Response(result.content, {
