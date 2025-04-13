@@ -57,12 +57,15 @@ const handler = async (req) => {
       const m3u8Lines = m3u8Text.split("\n");
       for (let i = 0; i < m3u8Lines.length; i++) {
         if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
-          const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
-          const keyPath = originalUri.split("/").pop();
-          const newUri = `${url.origin}/key-${keyPath}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
+          let originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
+          if (!originalUri.startsWith("http")) {
+            originalUri = new URL(originalUri, m3u8Url).href;
+          }
+          const keyPath = originalUri.split("/").slice(-3).join("/");
+          const newUri = `${url.origin}/key/${keyPath}?cookies=${encodeURIComponent(cookies)}&streamType=${encodeURIComponent(streamType)}&matchId=${encodeURIComponent(matchId)}&source=${encodeURIComponent(source)}&streamNo=${encodeURIComponent(streamNo)}&segmentPrefix=${encodeURIComponent(segmentPrefix)}`;
           m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
-          SEGMENT_MAP.set(`key-${keyPath}`, originalUri);
-          console.log(`Mapped key: key-${keyPath} to ${originalUri}`);
+          SEGMENT_MAP.set(`key/${keyPath}`, originalUri);
+          console.log(`Mapped key: key/${keyPath} to ${originalUri}`);
         } else if (m3u8Lines[i].startsWith("https://")) {
           const originalUrl = m3u8Lines[i].trim();
           const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
@@ -100,8 +103,8 @@ const handler = async (req) => {
   let fetchUrlResult;
   if (mappedUrl) {
     fetchUrlResult = mappedUrl;
-  } else if (requestedPath.startsWith("key-")) {
-    fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace("key-", "")}`;
+  } else if (requestedPath.startsWith("key/")) {
+    fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace("key/", "")}`;
   } else {
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`;
   }
