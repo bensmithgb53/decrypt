@@ -11,10 +11,19 @@ const HEADERS = {
 
 // Cache successful M3U8 URLs and track failures
 const M3U8_CACHE = new Map();
-const FAILURE_COUNT = new Map(); // Track failures per matchId-source
+const FAILURE_COUNT = new Map(); // Track failures per matchId-pathPrefix
 const SEGMENT_MAPS = new Map();
 
-// Fallback M3U8 content (placeholder; replace with a real fallback if available)
+// Source priority (higher number = higher priority)
+const SOURCE_PRIORITY = {
+  "delta": 3,
+  "alpha": 2,
+  "bravo": 1,
+  "unknown": 0
+};
+
+// Fallback M3U8 (replace with a real stream URL if available)
+const FALLBACK_M3U8_URL = "https://example.com/fallback.m3u8"; // Placeholder
 const FALLBACK_M3U8 = `#EXTM3U
 #EXT-X-VERSION:4
 #EXT-X-TARGETDURATION:10
@@ -27,6 +36,7 @@ async function fetchUrl(url, streamId, retries = 2, delay = 1000) {
   const expiry = urlObj.searchParams.get("expiry");
   const md5 = urlObj.searchParams.get("md5");
   const path = urlObj.pathname;
+  const pathPrefix = path.split("/").slice(0, 3).join("/"); // e.g., /s/B5Iv5eHPExCirRLhastT3mZ2rtt8x_NO4K0BdZXvoLeNBtqPQtho8K5r3yEILN9Z
 
   if (expiry && Date.now() / 1000 > parseInt(expiry)) {
     throw new Error(`URL expired: ${url} | Path: ${path} | MD5: ${md5} | Stream: ${streamId}`);
@@ -37,7 +47,8 @@ async function fetchUrl(url, streamId, retries = 2, delay = 1000) {
     try {
       const response = await fetch(url, { headers: HEADERS });
       if (!response.ok) {
-        throw new Error(`Failed: ${url} | Status: ${response.status} | Path: ${path} | MD5: ${md5} | Stream: ${streamId}`);
+        const errorBody = await response.text().catch(() => "No response body");
+        throw new Error(`Failed: ${url} | Status: ${response.status} | Path: ${path} | MD5: ${md5} | Stream: ${streamId} | Response: ${errorBody.slice(0, 100)}`);
       }
 
       const content = await response.arrayBuffer();
@@ -51,7 +62,7 @@ async function fetchUrl(url, streamId, retries = 2, delay = 1000) {
       console.log(`Success: ${url} | Status: ${response.status} | Content-Type: ${contentType} | Size: ${content.byteLength} bytes | Path: ${path} | MD5: ${md5} | Stream: ${streamId}`);
       return { content, contentType, text };
     } catch (e) {
-      if (attempt < retries) {
+      if (attempt < retries && (e.message.includes("Status: 404") || e.message.includes("Status: 500"))) {
         console.warn(`Retry ${attempt}/${retries} failed: ${e.message} | Stream: ${streamId}. Retrying after ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
@@ -67,7 +78,7 @@ const handler = async (req) => {
   const streamId = `${url.searchParams.get("matchId") || Date.now()}-${url.searchParams.get("streamNo") || "0"}`;
   const matchId = url.searchParams.get("matchId") || "unknown";
   const source = url.searchParams.get("source") || "unknown";
-  const failureKey = `${matchId}-${source}`;
+  const streamNo = url.searchParams.get("streamNo") || "0";
   console.log(`Request path: ${pathname}${url.search} | Stream: ${streamId} | Source: ${source}`);
 
   if (pathname === "/playlist.m3u8") {
@@ -76,11 +87,21 @@ const handler = async (req) => {
       return new Response("Missing 'url' query parameter", { status: 400 });
     }
 
-    // Skip source if it has failed too many times (e.g., 5)
+    const urlObj = new URL(m3u8Url);
+    const pathPrefix = urlObj.pathname.split("/").slice(0, 3).join("/");
+    const failureKey = `${matchId}-${pathPrefix}`;
+
+    // Check if URL pattern is blocked
     const failures = FAILURE_COUNT.get(failureKey) || 0;
     if (failures >= 5) {
-      console.warn(`Source ${source} blocked for ${matchId} due to ${failures} failures | Stream: ${streamId}`);
-      return new Response(`Stream source ${source} unavailable`, { status: 503 });
+      console.warn(`URL pattern ${pathPrefix} blocked for ${matchId} due to ${failures} failures | Stream: ${streamId}`);
+      return new Response(`Stream unavailable for ${source}`, { status: 503 });
+    }
+
+    // Prioritize source
+    const sourcePriority = SOURCE_PRIORITY[source] || 0;
+    if (sourcePriority < 2 && failures > 0) {
+      console.log(`Low-priority source ${source} (${sourcePriority}) with ${failures} failures; consider switching | Stream: ${streamId}`);
     }
 
     try {
@@ -129,55 +150,70 @@ const handler = async (req) => {
       FAILURE_COUNT.set(failureKey, failures + 1);
 
       // Try cached URL
-      if (e.message.includes("Status: 404") && M3U8_CACHE.has(matchId)) {
-        console.log(`Retrying with cached URL: ${M3U8_CACHE.get(matchId)} | Stream: ${streamId}`);
-        try {
-          const { content: m3u8Content, text: m3u8Text } = await fetchUrl(M3U8_CACHE.get(matchId), streamId);
-          console.log(`M3U8 preview: ${m3u8Text.slice(0, 100)} | Stream: ${streamId}`);
+      if (e.message.includes("Status: 404") || e.message.includes("Status: 500")) {
+        if (M3U8_CACHE.has(matchId)) {
+          console.log(`Retrying with cached URL: ${M3U8_CACHE.get(matchId)} | Stream: ${streamId}`);
+          try {
+            const { content: m3u8Content, text: m3u8Text } = await fetchUrl(M3U8_CACHE.get(matchId), streamId);
+            console.log(`M3U8 preview: ${m3u8Text.slice(0, 100)} | Stream: ${streamId}`);
 
-          const segmentMap = new Map();
-          SEGMENT_MAPS.set(streamId, segmentMap);
+            const segmentMap = new Map();
+            SEGMENT_MAPS.set(streamId, segmentMap);
 
-          const m3u8Lines = m3u8Text.split("\n");
-          for (let i = 0; i < m3u8Lines.length; i++) {
-            if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
-              const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
-              const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}`;
-              m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
-              segmentMap.set(originalUri.replace(/^\//, ""), new URL(originalUri, m3u8Url).href);
-            } else if (m3u8Lines[i].startsWith("https://")) {
-              const originalUrl = m3u8Lines[i].trim();
-              const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
-              const newUrl = `${url.origin}/${segmentName}`;
-              m3u8Lines[i] = newUrl;
-              segmentMap.set(segmentName, originalUrl);
-              console.log(`Segment mapping: ${segmentName} -> ${originalUrl} | Stream: ${streamId}`);
+            const m3u8Lines = m3u8Text.split("\n");
+            for (let i = 0; i < m3u8Lines.length; i++) {
+              if (m3u8Lines[i].startsWith("#EXT-X-KEY") && m3u8Lines[i].includes("URI=")) {
+                const originalUri = m3u8Lines[i].split('URI="')[1].split('"')[0];
+                const newUri = `${url.origin}/${originalUri.replace(/^\//, "")}`;
+                m3u8Lines[i] = m3u8Lines[i].replace(originalUri, newUri);
+                segmentMap.set(originalUri.replace(/^\//, ""), new URL(originalUri, m3u8Url).href);
+              } else if (m3u8Lines[i].startsWith("https://")) {
+                const originalUrl = m3u8Lines[i].trim();
+                const segmentName = originalUrl.split("/").pop().replace(".js", ".ts");
+                const newUrl = `${url.origin}/${segmentName}`;
+                m3u8Lines[i] = newUrl;
+                segmentMap.set(segmentName, originalUrl);
+                console.log(`Segment mapping: ${segmentName} -> ${originalUrl} | Stream: ${streamId}`);
+              }
             }
+
+            const rewrittenM3u8 = m3u8Lines.join("\n");
+            console.log(`Rewritten M3U8 content:\n${rewrittenM3u8} | Stream: ${streamId}`);
+
+            return new Response(rewrittenM3u8, {
+              headers: {
+                "Content-Type": "application/vnd.apple.mpegurl",
+                "Access-Control-Allow-Origin": "*"
+              }
+            });
+          } catch (retryError) {
+            console.error(`Retry failed: ${retryError.message} | Stream: ${streamId}`);
           }
-
-          const rewrittenM3u8 = m3u8Lines.join("\n");
-          console.log(`Rewritten M3U8 content:\n${rewrittenM3u8} | Stream: ${streamId}`);
-
-          return new Response(rewrittenM3u8, {
-            headers: {
-              "Content-Type": "application/vnd.apple.mpegurl",
-              "Access-Control-Allow-Origin": "*"
-            }
-          });
-        } catch (retryError) {
-          console.error(`Retry failed: ${retryError.message} | Stream: ${streamId}`);
         }
-      }
 
-      // Fallback to default M3U8 if failures exceed threshold
-      if (FAILURE_COUNT.get(failureKey) >= 3) {
-        console.warn(`Serving fallback M3U8 due to repeated failures (${FAILURE_COUNT.get(failureKey)}) | Stream: ${streamId}`);
-        return new Response(FALLBACK_M3U8, {
-          headers: {
-            "Content-Type": "application/vnd.apple.mpegurl",
-            "Access-Control-Allow-Origin": "*"
+        // Try fallback URL
+        if (FAILURE_COUNT.get(failureKey) >= 3) {
+          console.warn(`Attempting fallback URL: ${FALLBACK_M3U8_URL} due to ${failures + 1} failures | Stream: ${streamId}`);
+          try {
+            const { content: m3u8Content, text: m3u8Text } = await fetchUrl(FALLBACK_M3U8_URL, streamId);
+            console.log(`Fallback M3U8 preview: ${m3u8Text.slice(0, 100)} | Stream: ${streamId}`);
+            return new Response(m3u8Content, {
+              headers: {
+                "Content-Type": "application/vnd.apple.mpegurl",
+                "Access-Control-Allow-Origin": "*"
+              }
+            });
+          } catch (fallbackError) {
+            console.error(`Fallback URL failed: ${fallbackError.message} | Stream: ${streamId}`);
+            console.warn(`Serving static fallback M3U8 due to repeated failures (${failures + 1}) | Stream: ${streamId}`);
+            return new Response(FALLBACK_M3U8, {
+              headers: {
+                "Content-Type": "application/vnd.apple.mpegurl",
+                "Access-Control-Allow-Origin": "*"
+              }
+            });
           }
-        });
+        }
       }
 
       return new Response(`Error fetching M3U8: ${e.message}`, { status: 500 });
@@ -197,17 +233,15 @@ const handler = async (req) => {
     if (segmentPrefix && requestedPath.startsWith(segmentPrefix)) {
       fetchUrlResult = new URL(requestedPath.replace(".ts", ".js"), "https://rr.buytommy.top/").href;
       console.log(`Unmapped request, trying fallback: ${fetchUrlResult} | Stream: ${streamId}`);
+    } else if (requestedPath === "fallback.ts") {
+      console.log(`Serving fallback segment | Stream: ${streamId}`);
+      return new Response(new Uint8Array([]), {
+        headers: {
+          "Content-Type": "video/mp2t",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
     } else {
-      // Handle fallback segment request
-      if (requestedPath === "fallback.ts") {
-        console.log(`Serving fallback segment | Stream: ${streamId}`);
-        return new Response(new Uint8Array([]), {
-          headers: {
-            "Content-Type": "video/mp2t",
-            "Access-Control-Allow-Origin": "*"
-          }
-        });
-      }
       console.error(`Segment not found: ${requestedPath} | Stream: ${streamId}`);
       return new Response(`Segment not found: ${requestedPath}`, { status: 404 });
     }
