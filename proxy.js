@@ -9,6 +9,7 @@ const BASE_HEADERS = {
 };
 
 const NETLIFY_HOST = "https://flixy-proxy.netlify.app";
+const BASE_DOMAINS = ["https://p2-panel.streamed.su", "https://rr.buytommy.top"];
 const SEGMENT_MAP = new Map();
 
 async function fetchUrl(url, headers, retries = 2) {
@@ -43,7 +44,10 @@ const handler = async (req) => {
   const matchId = url.searchParams.get("matchId") || "unknown";
   const source = url.searchParams.get("source") || "unknown";
   const streamNo = url.searchParams.get("streamNo") || "unknown";
-  const segmentPrefix = url.searchParams.get("segmentPrefix") || matchId;
+  const segmentPrefix = url.searchParams.get("segmentPrefix") || `live-${matchId}`;
+  if (segmentPrefix.includes("unknown")) {
+    console.warn(`Invalid segmentPrefix: ${segmentPrefix}, using matchId: live-${matchId}`);
+  }
   console.log(`Request: /${pathname}, streamType: ${streamType}, matchId: ${matchId}, source: ${source}, streamNo: ${streamNo}, segmentPrefix: ${segmentPrefix}`);
 
   if (pathname === "playlist.m3u8") {
@@ -57,11 +61,19 @@ const handler = async (req) => {
     try {
       const headers = { ...BASE_HEADERS, ...(cookies && { Cookie: cookies }), "X-Stream-Type": streamType };
       let result;
-      try {
-        result = await fetchUrl(m3u8Url, headers);
-      } catch (e) {
-        console.log(`M3U8 failed, trying Netlify: ${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`);
-        result = await fetchUrl(`${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`, headers);
+      for (const domain of BASE_DOMAINS) {
+        const tryUrl = m3u8Url.replace("https://rr.buytommy.top", domain);
+        try {
+          console.log(`Trying M3U8: ${tryUrl}`);
+          result = await fetchUrl(tryUrl, headers);
+          break;
+        } catch (e) {
+          console.log(`M3U8 failed at ${domain}, error: ${e.message}`);
+          if (domain === BASE_DOMAINS[BASE_DOMAINS.length - 1]) {
+            console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`);
+            result = await fetchUrl(`${NETLIFY_HOST}/?destination=${encodeURIComponent(m3u8Url)}`, headers);
+          }
+        }
       }
 
       const m3u8Text = new TextDecoder().decode(result.content);
@@ -114,16 +126,26 @@ const handler = async (req) => {
 
   let fetchUrlResult;
   if (mappedUrl) {
-    fetchUrlResult = mappedUrl.replace("rr.buytommy.top", "p2-panel.streamed.su");
+    fetchUrlResult = mappedUrl;
   } else if (requestedPath.startsWith("key/")) {
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace("key/", "")}`;
   } else {
     fetchUrlResult = `https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`;
   }
-  console.log(`Fetching resource: ${fetchUrlResult}`);
 
   try {
-    let result = await fetchUrl(fetchUrlResult, headers);
+    let result;
+    for (const domain of BASE_DOMAINS) {
+      const tryUrl = fetchUrlResult.replace("https://p2-panel.streamed.su", domain);
+      console.log(`Fetching resource: ${tryUrl}`);
+      try {
+        result = await fetchUrl(tryUrl, headers);
+        break;
+      } catch (e) {
+        console.log(`Resource failed at ${domain}, error: ${e.message}`);
+        if (domain === BASE_DOMAINS[BASE_DOMAINS.length - 1]) throw e;
+      }
+    }
     return new Response(result.content, {
       headers: {
         "Content-Type": result.contentType === "text/javascript" ? "video/mp2t" : result.contentType,
@@ -131,9 +153,9 @@ const handler = async (req) => {
       }
     });
   } catch (e) {
-    console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`);
+    console.log(`Trying Netlify: ${NETLIFY_HOST}/?destination=${encodeURIComponent(fetchUrlResult)}`);
     try {
-      const result = await fetchUrl(`${NETLIFY_HOST}/?destination=https://p2-panel.streamed.su/${segmentPrefix}/${requestedPath.replace(".ts", ".js")}`, headers);
+      const result = await fetchUrl(`${NETLIFY_HOST}/?destination=${encodeURIComponent(fetchUrlResult)}`, headers);
       return new Response(result.content, {
         headers: {
           "Content-Type": result.contentType === "text/javascript" ? "video/mp2t" : result.contentType,
