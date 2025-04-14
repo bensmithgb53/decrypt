@@ -29,8 +29,18 @@ CORS_PROXY = "https://corsproxy.io/?url="
 # In-memory mappings for segment/key requests
 mappings = {}
 
+@app.route("/")
+def root():
+    logger.info("Root endpoint accessed")
+    return Response(
+        "Stream Proxy: Use /playlist.m3u8?url=<m3u8_url> to proxy M3U8 streams. Health check at /health.",
+        status=200,
+        mimetype="text/plain"
+    )
+
 @app.route("/health")
 def health():
+    logger.info("Health endpoint accessed")
     return Response("OK", status=200)
 
 @app.route("/playlist.m3u8")
@@ -43,7 +53,7 @@ def handle_m3u8():
     try:
         result = fetch_m3u8(m3u8_url)
         if not result:
-            logger.error("Failed to fetch M3U8")
+            logger.error(f"Failed to fetch M3U8: {m3u8_url}")
             return Response("Failed to fetch M3U8", status=500)
 
         content, content_type = result
@@ -52,7 +62,7 @@ def handle_m3u8():
         # Update mappings
         mappings.update(new_mappings)
 
-        logger.info("Serving rewritten M3U8")
+        logger.info(f"Serving rewritten M3U8 for {m3u8_url}")
         return Response(
             rewritten_m3u8,
             status=200,
@@ -61,7 +71,7 @@ def handle_m3u8():
         )
 
     except Exception as e:
-        logger.error(f"Error processing M3U8: {str(e)}")
+        logger.error(f"Error processing M3U8 {m3u8_url}: {str(e)}")
         return Response(str(e), status=500)
 
 @app.route("/<path:path>")
