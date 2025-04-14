@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 
 # Base headers
 BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Accept-Encoding": "identity",
+    "Origin": "https://embedstreams.top",
+    "X-Requested-With": "XMLHttpRequest"
 }
 
 # CORS proxy for segments
@@ -50,11 +52,27 @@ def handle_m3u8():
         return Response("Missing 'url' parameter", status=400)
 
     try:
-        # Use client referer if available
+        # Extract matchId, source, streamNo from referer
         client_referer = request.headers.get("Referer", "https://embedstreams.top/")
+        referer_parts = client_referer.split("/")
+        if len(referer_parts) >= 7 and referer_parts[3] == "embed":
+            source = referer_parts[4]
+            match_id = referer_parts[5]
+            stream_no = referer_parts[6]
+        else:
+            logger.error(f"Invalid referer format: {client_referer}")
+            source = match_id = stream_no = ""
+
+        # Fetch cookies from streamed.su
+        stream_url = f"https://streamed.su/watch/{match_id}/{source}/{stream_no}"
+        cookies = fetch_cookies(stream_url)
+        logger.info(f"Cookies fetched: {cookies}")
+
+        # Prepare headers with cookies
         headers = BASE_HEADERS.copy()
         headers["Referer"] = client_referer
-        headers["Origin"] = "https://embedstreams.top"
+        if cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
 
         result = fetch_m3u8(m3u8_url, headers)
         if not result:
@@ -87,7 +105,7 @@ def handle_segment(path):
         return Response("Not found", status=404)
 
     try:
-        response = requests.get(original_url, headers=BASE_HEADERS, stream=True, timeout=15)
+        response = requests.get(original_url, headers=BASE_HEADERS, stream=True, timeout=30)
         if response.status_code != 200:
             logger.error(f"Failed to fetch {original_url}: {response.status_code}")
             return Response("Failed to fetch resource", status=response.status_code)
@@ -105,13 +123,29 @@ def handle_segment(path):
         logger.error(f"Error fetching {original_url}: {str(e)}")
         return Response(str(e), status=500)
 
+def fetch_cookies(stream_url):
+    try:
+        logger.info(f"Fetching cookies from {stream_url}")
+        response = requests.get(stream_url, headers=BASE_HEADERS, timeout=15)
+        if response.status_code == 200:
+            cookies = response.cookies.get_dict()
+            logger.info(f"Got cookies: {cookies}")
+            return cookies
+        else:
+            logger.error(f"Failed to fetch cookies from {stream_url}: {response.status_code}")
+            return {}
+    except Exception as e:
+        logger.error(f"Error fetching cookies from {stream_url}: {str(e)}")
+        return {}
+
 def fetch_m3u8(url, headers):
-    for attempt in range(1, 3):
-        logger.info(f"Fetching (attempt {attempt}): {url}")
+    for attempt in range(1, 4):
+        logger.info(f"Fetching (attempt {attempt}): {url} with headers: {headers}")
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=headers, timeout=30)
+            logger.info(f"Response status: {response.status_code}, headers: {response.headers}")
             if response.status_code != 200:
-                logger.error(f"Failed to fetch {url}: {response.status_code}")
+                logger.error(f"Failed to fetch {url}: {response.status_code} - {response.text[:200]}")
                 continue
 
             content = response.content
@@ -136,7 +170,6 @@ def rewrite_m3u8(m3u8_content, base_url):
 
     for line in lines:
         if line.startswith("#EXT-X-KEY"):
-            # Rewrite key URI
             uri_start = line.find('URI="') + 5
             uri_end = line.find('"', uri_start)
             original_uri = line[uri_start:uri_end]
@@ -149,7 +182,6 @@ def rewrite_m3u8(m3u8_content, base_url):
             rewritten_lines.append(rewritten_line)
 
         elif line.startswith("https://p2-panel.streamed.su"):
-            # Rewrite segment URL
             segment_name = line.split("/")[-1].replace(".js", ".ts")
             local_path = segment_name
             original_url = f"{CORS_PROXY}{urllib.parse.quote(line)}"
