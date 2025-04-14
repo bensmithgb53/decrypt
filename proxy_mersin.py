@@ -4,6 +4,7 @@ import logging
 import urllib.parse
 import requests
 from flask import Flask, Response, request
+import os
 
 app = Flask(__name__)
 
@@ -14,12 +15,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Headers to mimic a browser
-HEADERS = {
+# Base headers
+BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
-    "Referer": "https://embedstreams.top/",
     "Accept": "*/*",
-    "Origin": "https://embedstreams.top",
     "Accept-Encoding": "identity",
 }
 
@@ -51,7 +50,13 @@ def handle_m3u8():
         return Response("Missing 'url' parameter", status=400)
 
     try:
-        result = fetch_m3u8(m3u8_url)
+        # Use client referer if available
+        client_referer = request.headers.get("Referer", "https://embedstreams.top/")
+        headers = BASE_HEADERS.copy()
+        headers["Referer"] = client_referer
+        headers["Origin"] = "https://embedstreams.top"
+
+        result = fetch_m3u8(m3u8_url, headers)
         if not result:
             logger.error(f"Failed to fetch M3U8: {m3u8_url}")
             return Response("Failed to fetch M3U8", status=500)
@@ -82,7 +87,7 @@ def handle_segment(path):
         return Response("Not found", status=404)
 
     try:
-        response = requests.get(original_url, headers=HEADERS, stream=True, timeout=15)
+        response = requests.get(original_url, headers=BASE_HEADERS, stream=True, timeout=15)
         if response.status_code != 200:
             logger.error(f"Failed to fetch {original_url}: {response.status_code}")
             return Response("Failed to fetch resource", status=response.status_code)
@@ -100,27 +105,28 @@ def handle_segment(path):
         logger.error(f"Error fetching {original_url}: {str(e)}")
         return Response(str(e), status=500)
 
-def fetch_m3u8(url):
-    logger.info(f"Fetching (attempt 1): {url}")
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        if response.status_code != 200:
-            logger.error(f"Failed to fetch {url}: {response.status_code}")
-            return None
+def fetch_m3u8(url, headers):
+    for attempt in range(1, 3):
+        logger.info(f"Fetching (attempt {attempt}): {url}")
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch {url}: {response.status_code}")
+                continue
 
-        content = response.content
-        content_type = response.headers.get("Content-Type", "application/octet-stream")
+            content = response.content
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
 
-        if content_type != "application/vnd.apple.mpegurl" and not content.startswith(b"#EXTM3U"):
-            logger.error(f"Invalid M3U8 content from {url}")
-            return None
+            if content_type != "application/vnd.apple.mpegurl" and not content.startswith(b"#EXTM3U"):
+                logger.error(f"Invalid M3U8 content from {url}")
+                continue
 
-        logger.info(f"Success: {url} - Status: {response.status_code}, Content-Type: {content_type}, Size: {len(content)} bytes")
-        return content, content_type
+            logger.info(f"Success: {url} - Status: {response.status_code}, Content-Type: {content_type}, Size: {len(content)} bytes")
+            return content, content_type
 
-    except Exception as e:
-        logger.error(f"Error fetching {url}: {str(e)}")
-        return None
+        except Exception as e:
+            logger.error(f"Error fetching {url}: {str(e)}")
+    return None
 
 def rewrite_m3u8(m3u8_content, base_url):
     lines = m3u8_content.splitlines()
