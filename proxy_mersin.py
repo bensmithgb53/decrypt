@@ -17,14 +17,15 @@ logger = logging.getLogger(__name__)
 
 # Base headers
 BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36",
     "Accept": "*/*",
     "Accept-Encoding": "identity",
+    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
     "Origin": "https://embedstreams.top",
     "X-Requested-With": "XMLHttpRequest"
 }
 
-# CORS proxy for segments
+# CORS proxy for segments and M3U8 fallback
 CORS_PROXY = "https://corsproxy.io/?url="
 
 # In-memory mappings for segment/key requests
@@ -63,10 +64,13 @@ def handle_m3u8():
             logger.error(f"Invalid referer format: {client_referer}")
             source = match_id = stream_no = ""
 
-        # Fetch cookies from streamed.su
+        # Fetch cookies from streamed.su and embedstreams.top
+        cookies = {}
         stream_url = f"https://streamed.su/watch/{match_id}/{source}/{stream_no}"
-        cookies = fetch_cookies(stream_url)
-        logger.info(f"Cookies fetched: {cookies}")
+        cookies.update(fetch_cookies(stream_url))
+        embed_url = f"https://embedstreams.top/embed/{source}/{match_id}/{stream_no}"
+        cookies.update(fetch_cookies(embed_url))
+        logger.info(f"Combined cookies: {cookies}")
 
         # Prepare headers with cookies
         headers = BASE_HEADERS.copy()
@@ -74,10 +78,17 @@ def handle_m3u8():
         if cookies:
             headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
 
-        result = fetch_m3u8(m3u8_url, headers)
+        # Try direct fetch first
+        result = fetch_m3u8(m3u8_url, headers, cookies)
         if not result:
-            logger.error(f"Failed to fetch M3U8: {m3u8_url}")
-            return Response("Failed to fetch M3U8", status=500)
+            # Fallback to corsproxy.io
+            logger.info(f"Falling back to corsproxy.io for {m3u8_url}")
+            proxy_m3u8_url = f"{CORS_PROXY}{urllib.parse.quote(m3u8_url)}"
+            headers["Referer"] = "https://embedstreams.top/"  # corsproxy.io needs generic referer
+            result = fetch_m3u8(proxy_m3u8_url, headers, cookies)
+            if not result:
+                logger.error(f"Failed to fetch M3U8: {m3u8_url} (direct and proxy)")
+                return Response("Failed to fetch M3U8", status=500)
 
         content, content_type = result
         rewritten_m3u8, new_mappings = rewrite_m3u8(content.decode('utf-8'), m3u8_url)
@@ -123,26 +134,26 @@ def handle_segment(path):
         logger.error(f"Error fetching {original_url}: {str(e)}")
         return Response(str(e), status=500)
 
-def fetch_cookies(stream_url):
+def fetch_cookies(url):
     try:
-        logger.info(f"Fetching cookies from {stream_url}")
-        response = requests.get(stream_url, headers=BASE_HEADERS, timeout=15)
+        logger.info(f"Fetching cookies from {url}")
+        response = requests.get(url, headers=BASE_HEADERS, timeout=15)
         if response.status_code == 200:
             cookies = response.cookies.get_dict()
             logger.info(f"Got cookies: {cookies}")
             return cookies
         else:
-            logger.error(f"Failed to fetch cookies from {stream_url}: {response.status_code}")
+            logger.error(f"Failed to fetch cookies from {url}: {response.status_code}")
             return {}
     except Exception as e:
-        logger.error(f"Error fetching cookies from {stream_url}: {str(e)}")
+        logger.error(f"Error fetching cookies from {url}: {str(e)}")
         return {}
 
-def fetch_m3u8(url, headers):
+def fetch_m3u8(url, headers, cookies):
     for attempt in range(1, 4):
-        logger.info(f"Fetching (attempt {attempt}): {url} with headers: {headers}")
+        logger.info(f"Fetching (attempt {attempt}): {url} with headers: {headers}, cookies: {cookies}")
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=30)
             logger.info(f"Response status: {response.status_code}, headers: {response.headers}")
             if response.status_code != 200:
                 logger.error(f"Failed to fetch {url}: {response.status_code} - {response.text[:200]}")
