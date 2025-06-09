@@ -1,9 +1,8 @@
 // Required imports
-import * as crypto from "https://deno.land/std@0.224.0/crypto/mod.ts";
 import { encodeBase64, decodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 // Function to rotate characters for decryption
-function rotateString(input: string): string {
+function rotateString(input) {
   return input
     .split("")
     .map((char) => {
@@ -17,11 +16,7 @@ function rotateString(input: string): string {
 }
 
 // Function to decrypt AES-CTR
-async function aesDecrypt(
-  encrypted: string,
-  key: string,
-  iv: string
-): Promise<string> {
+async function aesDecrypt(encrypted, key, iv) {
   const keyBytes = new TextEncoder().encode(key);
   const ivBytes = new TextEncoder().encode(iv);
   const encryptedBytes = decodeBase64(encrypted);
@@ -48,16 +43,14 @@ async function aesDecrypt(
 }
 
 // Function to create the binary request body (simplified protobuf-like structure)
-function createRequestBody(channel: string, streamNo: number): Uint8Array {
+function createRequestBody(channel, streamNo) {
   // Simplified representation of the protobuf RequestBody
-  // In reality, you'd need the exact proto schema, but we'll create a minimal version
   const buffer = new ArrayBuffer(16);
   const view = new DataView(buffer);
   
-  // Set some basic fields (this is a placeholder - actual implementation needs proto schema)
-  view.setUint32(0, 1, true); // Assuming some field ID
+  // Set some basic fields
+  view.setUint32(0, 1, true);
   view.setUint32(4, channel.length, true);
-  // Add channel string bytes
   const channelBytes = new TextEncoder().encode(channel);
   const finalBuffer = new Uint8Array(buffer.byteLength + channelBytes.length);
   finalBuffer.set(new Uint8Array(buffer), 0);
@@ -67,7 +60,7 @@ function createRequestBody(channel: string, streamNo: number): Uint8Array {
 }
 
 // Main function to get the m3u8 URL
-async function getM3u8Url(channelId: string, streamNo: number): Promise<string> {
+async function getM3u8Url(channelId, streamNo) {
   try {
     // Create request body
     const requestBody = createRequestBody(channelId, streamNo);
@@ -95,7 +88,7 @@ async function getM3u8Url(channelId: string, streamNo: number): Promise<string> 
     const arrayBuffer = await response.arrayBuffer();
     const responseBytes = new Uint8Array(arrayBuffer);
 
-    // Decode base64 response (assuming it's base64 encoded)
+    // Decode base64 response
     const encodedData = encodeBase64(responseBytes);
     const rotatedData = rotateString(encodedData);
 
