@@ -1,5 +1,5 @@
 // server.ts
-import { serve } from "https://deno.land/std@0.231.0/http/server.ts"; // Updated to latest std version and correct path
+import { serve } from "https://deno.land/std@0.231.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
 // Import CryptoJS components from jsdelivr
@@ -104,29 +104,29 @@ serve(async (req) => {
             const contentEncoding = response.headers.get("Content-Encoding")?.toLowerCase();
             console.log("Content-Encoding:", contentEncoding);
             const rawBytes = new Uint8Array(await response.arrayBuffer());
-            console.log("Raw bytes (0):", rawBytes.slice(0, 100));
+            console.log("Raw bytes (first 100):", rawBytes.slice(0, 100));
 
-            let m3u8;
-            if (contentEncoding == "br") {
-                console.log("Decompressing Brotli:");
+            let m3u8Text;
+            if (contentEncoding === "br") {
+                console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
-                m3u8 = new TextDecoder().decode(decompressed);
-                console.log("Decompressed M3U8 (first 200 chars):", m3u8u8.slice(0, 200));
+                m3u8Text = new TextDecoder().decode(decompressed);
+                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
             } else {
-                m3u8 = new TextDecoder().decode(rawBytes);
-                console.log("Uncompressed M3U8 (first 200 chars):", m3u8Text.slice(0, 8, 200));
-            });
+                m3u8Text = new TextDecoder().decode(rawBytes);
+                console.log("Uncompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
+            }
 
-            if (!m3u8.startsWith("#EXTM3U")) {
-                console.error("Error Invalid M3U8 content:", m3u8.slice(0, 6, 200));
-                return new Response(JSON.stringify({ "m3u8": m3u8, warning: "Invalid M3U8 content" }), {
+            if (!m3u8Text.startsWith("#EXTM3U")) {
+                console.error("Invalid M3U8 content:", m3u8Text.slice(0, 200));
+                return new Response(JSON.stringify({ m3u8: m3u8Text, warning: "Invalid M3U8 content" }), {
                     status: 200,
                     headers: { "Content-Type": "application/json" }
                 });
             }
 
-            console.log("Returning M3U8:", "m3u8.slice(0, 200));
-            return new Response(JSON.stringify({ m3u8: m3u8 }), {
+            console.log("Returning M3U8:", m3u8Text.slice(0, 200));
+            return new Response(JSON.stringify({ m3u8: m3u8Text }), {
                 status: 200,
                 headers: { "Content-Type": "application/json" }
             });
