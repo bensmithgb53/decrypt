@@ -2,12 +2,19 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-// Load CryptoJS as a side-effect import
-let CryptoJS = null;
+// Load CryptoJS components
+let CryptoJS = {};
 try {
-    await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js");
-    CryptoJS = globalThis.CryptoJS;
-    console.log("CryptoJS loaded:", !!CryptoJS);
+    await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/core.min.js");
+    await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/lib-typedarrays.min.js");
+    CryptoJS.AES = (await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/aes.min.js")).default;
+    CryptoJS.enc = {
+        Utf8: (await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-utf8.min.js")).default,
+        Base64: (await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-base64.min.js")).default
+    };
+    CryptoJS.mode = (await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/mode-ctr.min.js")).default;
+    CryptoJS.pad = (await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/pad-nopadding.min.js")).default;
+    console.log("CryptoJS loaded successfully, AES available:", !!CryptoJS.AES);
 } catch (e) {
     console.error("CryptoJS import error:", e.message);
 }
@@ -21,18 +28,31 @@ globalThis.document = {
     createElement: () => ({ remove: () => {}, style: {} })
 };
 
+// Fallback character shift function (if build.js fails)
+globalThis.decrypt = globalThis.decrypt || function(str) {
+    return str.split('')
+        .map(char => String.fromCharCode(char.charCodeAt(0) + 47))
+        .join('');
+};
+
 // Load build.js
 try {
-    const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
+    const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js", {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
+    });
     if (!buildJsResponse.ok) {
         throw new Error(`HTTP error: ${buildJsResponse.status} ${buildJsResponse.statusText}`);
     }
     const buildJsText = await buildJsResponse.text();
     console.log("build.js content (first 200 chars):", buildJsText.slice(0, 200));
-    eval(buildJsText); // Exposes globalThis.decrypt for character shift
+    eval(buildJsText); // Exposes globalThis.decrypt
     console.log("build.js loaded successfully, decrypt available:", !!globalThis.decrypt);
 } catch (e) {
     console.error("build.js fetch/eval error:", e.message);
+    console.log("Using fallback decrypt function");
 }
 
 serve(async (req) => {
@@ -42,7 +62,7 @@ serve(async (req) => {
         const encrypted = data.encrypted; // Expecting the 'd' variable
         const referer = data.referer || "https://embedstreams.top/embed/alpha/wwe-network/1";
 
-        if (!encrypted || !globalThis.decrypt || !CryptoJS) {
+        if (!encrypted || !globalThis.decrypt || !CryptoJS.AES) {
             return new Response(JSON.stringify({ error: "Missing data, decrypt function, or CryptoJS" }), {
                 status: 400,
                 headers: { "Content-Type": "application/json" }
@@ -58,7 +78,7 @@ serve(async (req) => {
             const decrypted = CryptoJS.AES.decrypt(
                 { ciphertext: CryptoJS.enc.Base64.parse(shifted) },
                 CryptoJS.enc.Utf8.parse("ISEEYOUmIQeEjoCgCnZFaKCgkqIlanYe"),
-                { iv: CryptoJS.enc.Utf8.parse("STOPSTOPSTOPSTOP"), mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding }
+                { iv: CryptoJS.enc.Utf8.parse("STOPSTOPSTOPSTOP"), mode: CryptoJS.mode, padding: CryptoJS.pad }
             ).toString(CryptoJS.enc.Utf8);
 
             console.log("Decrypted:", decrypted);
@@ -86,7 +106,6 @@ serve(async (req) => {
         console.log("Request data:", { m3u8Url, cookies, referer });
 
         if (!m3u8Url) {
-            console.log("Missing m3u8Url");
             return new Response(JSON.stringify({ error: "Missing m3u8Url" }), {
                 status: 400,
                 headers: { "Content-Type": "application/json" }
@@ -94,7 +113,7 @@ serve(async (req) => {
         }
 
         const headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0",
             "Accept": "*/*",
             "Origin": "https://embedstreams.top",
             "Referer": referer || "https://embedstreams.top/",
@@ -105,12 +124,10 @@ serve(async (req) => {
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "cross-site"
         };
-        console.log("Fetching with headers:", headers);
-
         try {
             const response = await fetch(m3u8Url, { headers });
             console.log("Response status:", response.status);
-            console.log("Response headers:", Object.fromEntries(response.headers.entries()));
+            console.log("Response headers:", Object.fromEntries(response.headers));
             const contentEncoding = response.headers.get("Content-Encoding")?.toLowerCase();
             console.log("Content-Encoding:", contentEncoding);
             const rawBytes = new Uint8Array(await response.arrayBuffer());
