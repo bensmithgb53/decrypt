@@ -1,4 +1,3 @@
-// server.ts - Fix based on bundle.js findings (No WASM for decrypt!)
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
