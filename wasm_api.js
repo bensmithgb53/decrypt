@@ -2,16 +2,15 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-// Load CryptoJS dynamically to define global CryptoJS
+// Load CryptoJS as a side-effect import
+let CryptoJS = null;
 try {
     await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js");
-    console.log("CryptoJS loaded:", !!globalThis.CryptoJS);
+    CryptoJS = globalThis.CryptoJS;
+    console.log("CryptoJS loaded:", !!CryptoJS);
 } catch (e) {
-    console.error("CryptoJS load error:", e.message);
+    console.error("CryptoJS import error:", e.message);
 }
-
-// Access global CryptoJS
-const CryptoJS = globalThis.CryptoJS;
 
 console.log("Starting Deno decryption server...");
 
@@ -25,7 +24,11 @@ globalThis.document = {
 // Load build.js
 try {
     const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
+    if (!buildJsResponse.ok) {
+        throw new Error(`HTTP error: ${buildJsResponse.status} ${buildJsResponse.statusText}`);
+    }
     const buildJsText = await buildJsResponse.text();
+    console.log("build.js content (first 200 chars):", buildJsText.slice(0, 200));
     eval(buildJsText); // Exposes globalThis.decrypt for character shift
     console.log("build.js loaded successfully, decrypt available:", !!globalThis.decrypt);
 } catch (e) {
@@ -36,7 +39,7 @@ serve(async (req) => {
     // Handle /decrypt endpoint
     if (req.method === "POST" && req.url.endsWith("/decrypt")) {
         const data = await req.json();
-        const encrypted = data.encrypted; // Expecting the 'd' variable from website debugger
+        const encrypted = data.encrypted; // Expecting the 'd' variable
         const referer = data.referer || "https://embedstreams.top/embed/alpha/wwe-network/1";
 
         if (!encrypted || !globalThis.decrypt || !CryptoJS) {
