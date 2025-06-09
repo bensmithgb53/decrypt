@@ -1,5 +1,5 @@
 // server.ts
-import { serve } from "jsr:@std/http@1.0.8/server"; // Use JSR for latest stable http module
+import { serve } from "jsr:@std/http@1.0.8"; // Use root export for serve function
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
 // Import CryptoJS components from jsdelivr
@@ -16,15 +16,14 @@ globalThis.document = {
 };
 
 // Load build.js
-const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
-const buildJsText = await buildJsResponse.text();
-eval(buildJsText); // Exposes globalThis.decrypt for character shift
-console.log("build.js loaded successfully");
-
-// AES decryption configuration
-const AES_KEY = "ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT";
-const AES_IV = "STOPSTOPSTOPSTOP";
-const BASE_URL = "https://rr.buytommy.top";
+try {
+    const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
+    const buildJsText = await buildJsResponse.text();
+    eval(buildJsText); // Exposes globalThis.decrypt for character shift
+    console.log("build.js loaded successfully");
+} catch (e) {
+    console.error("build.js fetch/eval error:", e.message);
+}
 
 serve(async (req) => {
     // Handle /decrypt endpoint
@@ -48,14 +47,14 @@ serve(async (req) => {
             // Step 2: Apply AES decryption
             const decrypted = AES.decrypt(
                 { ciphertext: Base64.parse(shifted) },
-                Utf8.parse(AES_KEY),
-                { iv: Utf8.parse(AES_IV), mode: CTR, padding: NoPadding }
+                Utf8.parse("ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT"),
+                { iv: Utf8.parse("STOPSTOPSTOPSTOP"), mode: CTR, padding: NoPadding }
             ).toString(Utf8);
 
             console.log("Decrypted:", decrypted);
 
             // Step 3: Construct full M3U8 URL
-            const m3u8Url = `${BASE_URL}${decrypted}`;
+            const m3u8Url = `https://rr.buytommy.top${decrypted}`;
             console.log("Final M3U8 URL:", m3u8Url);
 
             return new Response(JSON.stringify({ decrypted: m3u8Url }), {
