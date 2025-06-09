@@ -1,4 +1,4 @@
-// server.ts - Corrected for Deno Deploy type annotation parsing
+// server.ts - Corrected for Deno Deploy type annotation parsing in function signature
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
@@ -8,8 +8,8 @@ console.log("Starting API server (using direct JS decryption)...");
 // e.g., the Clappr player setup and body.insertAdjacentHTML)
 globalThis.window = globalThis;
 globalThis.document = { 
-    // REMOVED TYPE ANNOTATION '(selector: string)' here
-    querySelector: (selector) => { // Fix: Removed ': string' type annotation
+    // Fix: Removed ': string' type annotation for 'selector' parameter
+    querySelector: (selector) => { 
         if (selector === "button") return { remove: () => {}, addEventListener: () => {} };
         return { appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 };
     },
@@ -19,9 +19,10 @@ globalThis.document = {
 
 // --- DIRECT JAVASCRIPT DECRYPTION FUNCTION ---
 // Replicating the 'r' function found in bundle.js snippet
-globalThis.decrypt = function(encryptedString: string): string {
+// FIX: Removed ': string' type annotations from both parameter and return type
+globalThis.decrypt = function(encryptedString) { 
     // console.log("Decrypting string:", encryptedString); // Uncomment for debugging
-    return encryptedString.split("").map((char: string) => {
+    return encryptedString.split("").map((char) => { // Fix: Removed ': string' type annotation for 'char'
         const charCode = char.charCodeAt(0);
         // Only shift characters within ASCII printable range 33-126 (inclusive)
         if (charCode >= 33 && charCode <= 126) {
