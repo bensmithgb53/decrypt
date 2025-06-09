@@ -1,13 +1,14 @@
 // server.ts
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts"; // Fallback to stable deno.land/std
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-// Import CryptoJS components individually from jsdelivr
+// Import CryptoJS core and components from jsdelivr
+import "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/core.js"; // Load core first
 import * as AES from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/aes.js";
 import * as encUtf8 from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-utf8.js";
 import * as encBase64 from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-base64.js";
-import * as CTR from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/mode-ctr.js";
-import * as NoPadding from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/pad-nopadding.js";
+import * as modeCTR from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/mode-ctr.js";
+import * as padNoPadding from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/pad-nopadding.js";
 
 console.log("Starting Deno decryption server...");
 
@@ -51,7 +52,7 @@ serve(async (req) => {
             const decrypted = AES.decrypt(
                 { ciphertext: encBase64.parse(shifted) },
                 encUtf8.parse("ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT"),
-                { iv: encUtf8.parse("STOPSTOPSTOPSTOP"), mode: CTR, padding: NoPadding }
+                { iv: encUtf8.parse("STOPSTOPSTOPSTOP"), mode: modeCTR, padding: padNoPadding }
             ).toString(encUtf8);
 
             console.log("Decrypted:", decrypted);
