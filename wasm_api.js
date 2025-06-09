@@ -1,47 +1,63 @@
-// server.ts
+// server.ts - Fix based on bundle.js findings (No WASM for decrypt!)
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-console.log("Starting WASM API server...");
+console.log("Starting API server (using direct JS decryption)...");
 
-// Mock window and document for WASM compatibility
+// Mock window and document (still good practice as some JS might rely on them,
+// e.g., the Clappr player setup and body.insertAdjacentHTML)
 globalThis.window = globalThis;
 globalThis.document = { 
-    querySelector: () => ({ appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 }), 
-    createElement: () => ({ remove: () => {}, style: {} })
+    querySelector: (selector: string) => { // Added basic selector handling
+        if (selector === "button") return { remove: () => {}, addEventListener: () => {} };
+        return { appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 };
+    }, 
+    createElement: () => ({ remove: () => {}, style: {} }),
+    body: { insertAdjacentHTML: () => {}, appendChild: () => {} } // Crucial for player HTML
 };
 
-// Load wasm_exec.js
-const wasmExecResponse = await fetch("https://embedstreams.top/plr/wasm_exec.js");
-eval(await wasmExecResponse.text());
+// --- DIRECT JAVASCRIPT DECRYPTION FUNCTION ---
+// Replicating the 'r' function found in bundle.js snippet
+globalThis.decrypt = function(encryptedString: string): string {
+    // console.log("Decrypting string:", encryptedString); // Uncomment for debugging
+    return encryptedString.split("").map((char: string) => {
+        const charCode = char.charCodeAt(0);
+        // Only shift characters within ASCII printable range 33-126 (inclusive)
+        if (charCode >= 33 && charCode <= 126) {
+            // Formula: 33 + ( (current_code - 33) + 47 ) % 94
+            // 94 is the number of printable ASCII characters from 33 to 126 (126 - 33 + 1 = 94)
+            // 47 is the shift amount
+            return String.fromCharCode(33 + ((charCode - 33 + 47) % 94));
+        }
+        // Return character unchanged if it's outside the specified range
+        return char;
+    }).join("");
+};
 
-// Initialize and run Go WASM
-const go = new Go();
-const wasmResponse = await fetch("https://embedstreams.top/plr/main.wasm");
-const wasmModule = await WebAssembly.instantiate(await wasmResponse.arrayBuffer(), go.importObject);
-go.run(wasmModule.instance);
+console.log("Decryption function 'globalThis.decrypt' loaded successfully.");
 
-// Scheduler for Go runtime
-setInterval(() => {
-    if (go._inst && typeof go._inst.exports.go_scheduler === "function") {
-        go._inst.exports.go_scheduler();
-    }
-}, 100);
+// --- No WASM loading needed anymore for decryption! ---
+// All previous WASM-related `fetch`, `eval`, `new Go()`, `go.run()`, and `setInterval`
+// for `go_scheduler` have been removed, as they are no longer necessary for decryption.
 
 serve(async (req) => {
     // Handle /decrypt endpoint
     if (req.method === "POST" && req.url.endsWith("/decrypt")) {
         const data = await req.json();
         const encrypted = data.encrypted;
-        const referer = data.referer || "https://embedstreams.top/embed/alpha/sky-sports-darts/1";
-        if (!encrypted || !globalThis.decrypt) {
+        // Referer is primarily for the browser's context, less critical for the decrypt function itself
+        const referer = data.referer || "https://embedstreams.top/embed/alpha/sky-sports-darts/1"; 
+        
+        if (!encrypted || typeof globalThis.decrypt !== 'function') {
+            console.error("Missing data or decrypt function not available:", typeof globalThis.decrypt);
             return new Response(JSON.stringify({ error: "Missing data or decrypt function" }), { 
                 status: 400,
                 headers: { "Content-Type": "application/json" }
             });
         }
         try {
-            const decrypted = globalThis.decrypt(encrypted);
+            console.log("Attempting decryption...");
+            const decrypted = globalThis.decrypt(encrypted); // Call our direct JS decrypt function
             console.log("Decrypted:", decrypted);
             return new Response(JSON.stringify({ decrypted: decrypted }), { 
                 status: 200,
@@ -56,7 +72,7 @@ serve(async (req) => {
         }
     }
 
-    // Handle /fetch-m3u8 endpoint
+    // Handle /fetch-m3u8 endpoint (remains largely the same as its logic was fine)
     if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
         const { m3u8Url, cookies, referer } = await req.json();
         console.log("Request data:", { m3u8Url, cookies, referer });
@@ -70,16 +86,17 @@ serve(async (req) => {
         }
 
         const headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36", // Slightly updated User-Agent
             "Accept": "*/*",
             "Origin": "https://embedstreams.top",
             "Referer": referer || "https://embedstreams.top/",
-            "Accept-Encoding": "br",
+            "Accept-Encoding": "br", // Brotli compression
             "Cookie": cookies || "",
             "Connection": "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "cross-site"
+            "Sec-Fetch-Site": "cross-site",
+            // Add other headers that your browser sends if necessary (e.g., Sec-Ch-Ua, etc.)
         };
         console.log("Fetching with headers:", headers);
 
@@ -97,7 +114,7 @@ serve(async (req) => {
                 console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
                 m3u8Text = new TextDecoder().decode(decompressed);
-                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
+                console.log("Decompressed M3U8 (first 200):", m3u3Text.slice(0, 200));
             } else {
                 m3u8Text = new TextDecoder().decode(rawBytes);
                 console.log("Uncompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
@@ -105,7 +122,7 @@ serve(async (req) => {
 
             // Pass through even if not perfect, for debugging
             if (!m3u8Text.startsWith("#EXTM3U")) {
-                console.error("Invalid M3U8 content:", m3u8Text.slice(0, 200));
+                console.error("Invalid M3U8 content (does not start with #EXTM3U):", m3u8Text.slice(0, 200));
                 return new Response(JSON.stringify({ m3u8: m3u8Text, warning: "Invalid M3U8 content" }), { 
                     status: 200,
                     headers: { "Content-Type": "application/json" }
@@ -132,4 +149,4 @@ serve(async (req) => {
     });
 }, { port: 8000 });
 
-console.log("Server running on Deno Deploy");
+console.log("Server running on http://localhost:8000");
