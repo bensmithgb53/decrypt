@@ -11,7 +11,7 @@ globalThis.document = {
     querySelector: (selector: string) => { // Added basic selector handling
         if (selector === "button") return { remove: () => {}, addEventListener: () => {} };
         return { appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 };
-    }, 
+    }, // <-- THIS WAS THE SEMICOLON, NOW A COMMA
     createElement: () => ({ remove: () => {}, style: {} }),
     body: { insertAdjacentHTML: () => {}, appendChild: () => {} } // Crucial for player HTML
 };
@@ -114,7 +114,7 @@ serve(async (req) => {
                 console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
                 m3u8Text = new TextDecoder().decode(decompressed);
-                console.log("Decompressed M3U8 (first 200):", m3u3Text.slice(0, 200));
+                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200)); // Changed `m3u3Text` to `m3u8Text` here
             } else {
                 m3u8Text = new TextDecoder().decode(rawBytes);
                 console.log("Uncompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
