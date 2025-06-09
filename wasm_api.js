@@ -1,10 +1,13 @@
 // server.ts
-import { serve } from "jsr:@std/http@1.0.8"; // Use root export for serve function
+import { serve } from "jsr:@std/http@1.0.8";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-// Import CryptoJS components from jsdelivr
-import CryptoJS from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/index.js";
-const { AES, enc: { Utf8, Base64 }, mode: { CTR }, pad: { NoPadding } } = CryptoJS;
+// Import CryptoJS components individually from jsdelivr
+import * as AES from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/aes.js";
+import * as encUtf8 from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-utf8.js";
+import * as encBase64 from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/enc-base64.js";
+import * as CTR from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/mode-ctr.js";
+import * as NoPadding from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/pad-nopadding.js";
 
 console.log("Starting Deno decryption server...");
 
@@ -40,16 +43,16 @@ serve(async (req) => {
         }
 
         try {
-            // Step 1: Apply character shift decryption (+47) from build.js
+            // Step 1: Apply character shift decryption
             const shifted = globalThis.decrypt(encrypted);
             console.log("Shifted:", shifted);
 
             // Step 2: Apply AES decryption
             const decrypted = AES.decrypt(
-                { ciphertext: Base64.parse(shifted) },
-                Utf8.parse("ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT"),
-                { iv: Utf8.parse("STOPSTOPSTOPSTOP"), mode: CTR, padding: NoPadding }
-            ).toString(Utf8);
+                { ciphertext: encBase64.parse(shifted) },
+                encUtf8.parse("ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT"),
+                { iv: encUtf8.parse("STOPSTOPSTOPSTOP"), mode: CTR, padding: NoPadding }
+            ).toString(encUtf8);
 
             console.log("Decrypted:", decrypted);
 
