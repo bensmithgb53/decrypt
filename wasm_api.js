@@ -1,9 +1,10 @@
 // server.ts - Adding CORS Headers and Full Decryption Logic
-import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+// Updated Deno Standard Library version to improve compatibility.
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts"; // <--- UPDATED HERE
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 import * as CryptoJS from "https://deno.land/x/crypto_js@v1.0.1/mod.ts"; // Import CryptoJS
 
-console.log("Starting API server (with full decryption)...");
+console.log("Starting API server (with full decryption and updated std version)...");
 
 // Mock window and document for compatibility, though not strictly needed for this specific decryption logic.
 globalThis.window = globalThis;
@@ -57,12 +58,9 @@ serve(async (req) => {
     if (req.method === "POST" && req.url.endsWith("/decrypt")) {
         try {
             const data = await req.json();
-            // Expected input 'encrypted' is the Base64 value from B.getU(), BEFORE the character shift.
-            // For example: the Base64-decoded version of ISEEYOUmUwWHQgXyQbGDcmBEYvcVPnsH, then getU()
-            // However, the website's `d` variable was the result of char shift.
-            // Let's assume 'encrypted' is the value of 'd' you get from the breakpoint:
+            // Expected input 'encrypted' is the 'd' variable you get from the breakpoint:
             // "QGARe3+7JBJpnozS+u9dBS2ptzbgmiz3gOVsLd40z8+9tstoTMj5lj9gvB9RTdsTQ+jSGMxBoSmPCCU="
-            const d_variable_from_breakpoint = data.encrypted; // This is the 'd' from your breakpoint
+            const d_variable_from_breakpoint = data.encrypted;
 
             if (!d_variable_from_breakpoint) {
                 return new Response(JSON.stringify({ error: "Missing 'encrypted' payload for decryption." }), {
@@ -174,4 +172,3 @@ serve(async (req) => {
 }, { port: 8000 });
 
 console.log("Server running on http://localhost:8000");
-
