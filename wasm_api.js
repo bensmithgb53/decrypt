@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { Aes, ModeOfOperation } from "https://deno.land/x/aes@v1.2.0/mod.ts";
+import { AesCtr } from "https://deno.land/x/crypto@v0.11.0/aes.ts";
 
 console.log("Starting M3U8 decryption server...");
 
@@ -40,10 +40,9 @@ async function decryptM3u8Url(encrypted) {
 
   // Step 3: AES-CTR decryption
   try {
-    const aes = new Aes(AES_KEY);
-    const ctr = new ModeOfOperation.ctr(aes, AES_IV);
+    const cipher = new AesCtr(AES_KEY, AES_IV);
     const encryptedBytes = new TextEncoder().encode(shifted);
-    const decryptedBytes = ctr.decrypt(encryptedBytes);
+    const decryptedBytes = cipher.decrypt(encryptedBytes);
     const decrypted = new TextDecoder().decode(decryptedBytes);
 
     // Step 4: Append to base URL
