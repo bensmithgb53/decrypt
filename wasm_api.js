@@ -1,5 +1,5 @@
 // server.ts
-import { serve } from "https://deno.land/std@0.231.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.232.0/http/server.ts"; // Updated to a newer version
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
 // Import CryptoJS components from jsdelivr
@@ -19,6 +19,7 @@ globalThis.document = {
 const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
 const buildJsText = await buildJsResponse.text();
 eval(buildJsText); // Exposes globalThis.decrypt for character shift
+console.log("build.js loaded successfully");
 
 // AES decryption configuration
 const AES_KEY = "ISEEYOUzXnwlulEpMNtMvQZQsVZmJpXT";
