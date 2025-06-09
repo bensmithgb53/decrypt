@@ -2,8 +2,16 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
-// Load CryptoJS (full library for simplicity and reliability)
-import CryptoJS from "https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js";
+// Load CryptoJS dynamically to define global CryptoJS
+try {
+    await import("https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js");
+    console.log("CryptoJS loaded:", !!globalThis.CryptoJS);
+} catch (e) {
+    console.error("CryptoJS load error:", e.message);
+}
+
+// Access global CryptoJS
+const CryptoJS = globalThis.CryptoJS;
 
 console.log("Starting Deno decryption server...");
 
@@ -19,7 +27,7 @@ try {
     const buildJsResponse = await fetch("https://embedstreams.top/plr/build.js");
     const buildJsText = await buildJsResponse.text();
     eval(buildJsText); // Exposes globalThis.decrypt for character shift
-    console.log("build.js loaded successfully");
+    console.log("build.js loaded successfully, decrypt available:", !!globalThis.decrypt);
 } catch (e) {
     console.error("build.js fetch/eval error:", e.message);
 }
@@ -31,8 +39,8 @@ serve(async (req) => {
         const encrypted = data.encrypted; // Expecting the 'd' variable from website debugger
         const referer = data.referer || "https://embedstreams.top/embed/alpha/wwe-network/1";
 
-        if (!encrypted || !globalThis.decrypt) {
-            return new Response(JSON.stringify({ error: "Missing data or decrypt function" }), {
+        if (!encrypted || !globalThis.decrypt || !CryptoJS) {
+            return new Response(JSON.stringify({ error: "Missing data, decrypt function, or CryptoJS" }), {
                 status: 400,
                 headers: { "Content-Type": "application/json" }
             });
