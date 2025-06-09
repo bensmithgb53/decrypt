@@ -1,5 +1,5 @@
 // server.ts
-import { serve } from "jsr:@std/http@1.0.8";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts"; // Fallback to stable deno.land/std
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
 // Import CryptoJS components individually from jsdelivr
