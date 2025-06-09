@@ -1,3 +1,4 @@
+// server.ts - Corrected for Deno Deploy type annotation parsing
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { decompress } from "https://deno.land/x/brotli@0.1.7/mod.ts";
 
@@ -7,10 +8,11 @@ console.log("Starting API server (using direct JS decryption)...");
 // e.g., the Clappr player setup and body.insertAdjacentHTML)
 globalThis.window = globalThis;
 globalThis.document = { 
-    querySelector: (selector: string) => { // Added basic selector handling
+    // REMOVED TYPE ANNOTATION '(selector: string)' here
+    querySelector: (selector) => { // Fix: Removed ': string' type annotation
         if (selector === "button") return { remove: () => {}, addEventListener: () => {} };
         return { appendChild: () => {}, offsetHeight: 100, offsetWidth: 100 };
-    }, // <-- THIS WAS THE SEMICOLON, NOW A COMMA
+    },
     createElement: () => ({ remove: () => {}, style: {} }),
     body: { insertAdjacentHTML: () => {}, appendChild: () => {} } // Crucial for player HTML
 };
@@ -113,7 +115,7 @@ serve(async (req) => {
                 console.log("Decompressing Brotli...");
                 const decompressed = decompress(rawBytes);
                 m3u8Text = new TextDecoder().decode(decompressed);
-                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200)); // Changed `m3u3Text` to `m3u8Text` here
+                console.log("Decompressed M3U8 (first 200):", m3u8Text.slice(0, 200)); 
             } else {
                 m3u8Text = new TextDecoder().decode(rawBytes);
                 console.log("Uncompressed M3U8 (first 200):", m3u8Text.slice(0, 200));
