@@ -1,7 +1,7 @@
-// server.ts
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+// server.js
+import { serve } from "https://deno.land/std@0.224.0/http/server.js";
 
-function rotateString(input: string): string {
+function rotateString(input) {
   return input
     .split("")
     .map((char) => {
@@ -14,7 +14,7 @@ function rotateString(input: string): string {
     .join("");
 }
 
-async function aesDecrypt(encrypted: string, key: string, iv: string): Promise<string> {
+async function aesDecrypt(encrypted, key, iv) {
   const keyBytes = new TextEncoder().encode(key);
   const ivBytes = new TextEncoder().encode(iv);
   const encryptedBytes = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
@@ -40,7 +40,7 @@ async function aesDecrypt(encrypted: string, key: string, iv: string): Promise<s
   return new TextDecoder().decode(decrypted);
 }
 
-function createRequestBody(channelPart1: string, channelPart2: string, streamNo: string): Uint8Array {
+function createRequestBody(channelPart1, channelPart2, streamNo) {
   const rawPayload = [
     0x0a, 0x05, 0x61, 0x6c, 0x70, 0x68, 0x61, // part1: "alpha"
     0x12, 0x0b, 0x77, 0x77, 0x65, 0x2d, 0x6e, 0x65, 0x74, 0x77, 0x6f, 0x72, 0x6b, // part2: "wwe-network"
@@ -49,7 +49,7 @@ function createRequestBody(channelPart1: string, channelPart2: string, streamNo:
   return new Uint8Array(rawPayload);
 }
 
-async function getM3u8Url(channelPart1: string, channelPart2: string, streamNo: string): Promise<string> {
+async function getM3u8Url(channelPart1, channelPart2, streamNo) {
   const requestBody = createRequestBody(channelPart1, channelPart2, streamNo);
   const response = await fetch("https://embedstreams.top/fetch", {
     method: "POST",
@@ -84,7 +84,7 @@ async function getM3u8Url(channelPart1: string, channelPart2: string, streamNo: 
   return `https://rr.buytommy.top${decrypted}`;
 }
 
-serve(async (req: Request) => {
+serve(async (req) => {
   if (req.method === "POST" && req.url.endsWith("/fetch-m3u8")) {
     try {
       const { channelPart1 = "alpha", channelPart2 = "wwe-network", streamNo = "1" } = await req.json();
