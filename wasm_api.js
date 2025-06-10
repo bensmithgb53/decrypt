@@ -1,8 +1,6 @@
 // server.ts
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
-console.log("Starting m3u8 API server...");
-
 function rotateString(input: string): string {
   return input
     .split("")
@@ -53,7 +51,6 @@ function createRequestBody(channelPart1: string, channelPart2: string, streamNo:
 
 async function getM3u8Url(channelPart1: string, channelPart2: string, streamNo: string): Promise<string> {
   const requestBody = createRequestBody(channelPart1, channelPart2, streamNo);
-  console.log("Request body (hex):", Array.from(requestBody).map((b) => b.toString(16).padStart(2, "0")).join(" "));
   const response = await fetch("https://embedstreams.top/fetch", {
     method: "POST",
     headers: {
@@ -72,19 +69,15 @@ async function getM3u8Url(channelPart1: string, channelPart2: string, streamNo: 
     },
     body: requestBody,
   });
-  console.log("Response status:", response.status);
-  console.log("Response headers:", [...response.headers]);
   if (!response.ok) {
     const errorText = await response.text();
-    console.log("Response error text:", errorText);
-    throw new Error(`Fetch failed: ${response.status}`);
+    throw new Error(`Fetch failed: ${response.status} - ${errorText}`);
   }
   const whatHeader = response.headers.get("What");
   if (!whatHeader) {
     throw new Error("Missing What header");
   }
   const arrayBuffer = await response.arrayBuffer();
-  console.log("Response bytes:", new Uint8Array(arrayBuffer).length);
   const encodedData = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
   const rotatedData = rotateString(encodedData);
   const decrypted = await aesDecrypt(rotatedData, whatHeader, "STOPSTOPSTOPSTOP");
