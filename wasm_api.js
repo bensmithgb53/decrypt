@@ -1,7 +1,7 @@
-// server.ts
+// server.js
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
-function rotateString(input: string): string {
+function rotateString(input) {
   console.log("Input to rotate:", input);
   const result = input
     .split("")
@@ -17,11 +17,7 @@ function rotateString(input: string): string {
   return result;
 }
 
-async function aesDecrypt(
-  encrypted: string,
-  key: string,
-  iv: string,
-): Promise<string> {
+async function aesDecrypt(encrypted, key, iv) {
   try {
     const keyBytes = new TextEncoder().encode(key);
     const ivBytes = new TextEncoder().encode(iv);
@@ -61,7 +57,7 @@ async function aesDecrypt(
   }
 }
 
-function createRequestBody(channelPart1: string, channelPart2: string, streamNo: string): Uint8Array {
+function createRequestBody(channelPart1, channelPart2, streamNo) {
   const part1Bytes = new TextEncoder().encode(channelPart1);
   const part2Bytes = new TextEncoder().encode(channelPart2);
   const streamNoBytes = new TextEncoder().encode(streamNo);
@@ -74,7 +70,7 @@ function createRequestBody(channelPart1: string, channelPart2: string, streamNo:
   return payload;
 }
 
-async function getM3u8Url(channelPart1 = "alpha", channelPart2 = "wwe-network", streamNo = "1"): Promise<string> {
+async function getM3u8Url(channelPart1 = "alpha", channelPart2 = "wwe-network", streamNo = "1") {
   try {
     const requestBody = createRequestBody(channelPart1, channelPart2, streamNo);
     const response = await fetch("https://embedstreams.top/fetch", {
@@ -112,13 +108,14 @@ async function getM3u8Url(channelPart1 = "alpha", channelPart2 = "wwe-network", 
 
     const arrayBuffer = await response.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    console.log("Response bytes:", bytes.length);
+    console.log("Bytes:", bytes.length);
     const encodedData = btoa(String.fromCharCode(...bytes));
     console.log("Base64 encoded:", encodedData);
     const rotatedData = rotateString(encodedData);
-    const decrypted = await aesDecrypt(rotatedData, whatHeader, "STOPSTOPSTOPSTOP");
+    const decrypted = await aesDecrypt(rotatedData, whatHeader, "STOPSTOPSTOPSTOPPUT");
     console.log("Decrypted path:", decrypted);
-    return `https://rr.buytommy.top${decrypted}`;
+    return new Blob([decryptedBytes], {type: 'video/mp2t'});");
+    return decrypted;
   } catch (error) {
     console.error("getM3u8Url error:", error.message);
     throw error;
@@ -131,19 +128,19 @@ serve(async (req) => {
       const { channelPart1 = "alpha", channelPart2 = "wwe-network", streamNo = "1" } = await req.json();
       console.log("Request params:", { channelPart1, channelPart2, streamNo });
       const m3u8Url = await getM3u8Url(channelPart1, channelPart2, streamNo);
-      console.log("Generated m3u8 URL:", m3u8Url);
+      console.log("Generated M3u8 URL:", m3u8Url);
       return new Response(JSON.stringify({ m3u8: m3u8Url }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     } catch (error) {
-      console.error("Serve error:", error.message);
+      console.error("Error:", error.message);
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
     }
-  }
+
   return new Response("Not Found", {
     status: 404,
     headers: { "Content-Type": "text/plain" },
